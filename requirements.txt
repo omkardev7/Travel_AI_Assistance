@@ -1,0 +1,21 @@
+# Core Dependencies
+crewai[google-genai]
+crewai-tools
+python-dotenv
+pydantic-settings
+
+# API Framework
+fastapi
+uvicorn[standard]
+
+# Google AI - Important: Add langchain-google-genai
+langchain-google-genai
+google-generativeai
+
+# Utilities
+requests
+httpx
+exa_py
+
+# Optional: Development Tools
+pytest
