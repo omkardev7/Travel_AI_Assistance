@@ -28,11 +28,11 @@ class Settings(BaseSettings):
     
     # CrewAI Settings - DISABLE BUILT-IN MEMORY
     CREW_MEMORY: bool = False  # Changed from True to False
-    CREW_VERBOSE: bool = False  # Changed from True to False to reduce output
+    CREW_VERBOSE: bool = True  # Changed from True to False to reduce output
     CREWAI_TRACING_ENABLED: bool = False
     
     # LLM Settings - Use correct Gemini model format
-    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_MODEL: str = "gemini-flash-latest"
     GEMINI_TEMPERATURE: float = 0.7
     
     # EXA Settings

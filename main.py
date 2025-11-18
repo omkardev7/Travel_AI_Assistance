@@ -1,7 +1,7 @@
 # main.py
 """
 Multi-Lingual Travel Assistant - FastAPI Application
-OPTIMIZED: Works with simplified database (3 tables only)
+IMPROVED: Handles incomplete input with context merging
 """
 
 from fastapi import FastAPI, HTTPException
@@ -11,6 +11,7 @@ import uuid
 from typing import Optional
 import json
 import re
+from datetime import datetime
 
 from crew import create_travel_crew, kickoff_crew
 from config import settings
@@ -26,8 +27,8 @@ memory = get_memory_manager()
 # Initialize FastAPI app
 app = FastAPI(
     title="Multi-Lingual Travel Assistant",
-    description="AI-powered travel assistant with optimized memory storage",
-    version="2.1.0"
+    description="AI-powered travel assistant with hierarchical routing",
+    version="2.3.0"
 )
 
 # CORS middleware
@@ -50,6 +51,7 @@ class ChatResponse(BaseModel):
     response: str
     detected_language: Optional[str] = None
     is_followup: bool
+    is_complete: bool = True
     agents_called: Optional[list] = None
     status: str = "success"
 
@@ -58,9 +60,13 @@ async def root():
     """Root endpoint"""
     return {
         "message": "Multi-Lingual Travel Assistant API",
-        "version": "2.1.0",
+        "version": "2.3.0",
         "status": "running",
-        "memory_system": "Optimized SQLite (3 tables only)"
+        "features": [
+            "Hierarchical routing (only ONE search agent runs)",
+            "Context-aware incomplete input handling",
+            "Multi-language support"
+        ]
     }
 
 @app.get("/health")
@@ -69,8 +75,8 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "travel-assistant",
-        "database_tables": ["sessions", "messages", "agent_outputs"],
-        "memory_system": "optimized"
+        "process_type": "hierarchical",
+        "memory_system": "optimized SQLite"
     }
 
 def extract_json_from_text(text: str) -> Optional[dict]:
@@ -98,9 +104,56 @@ def extract_json_from_text(text: str) -> Optional[dict]:
     
     return None
 
+def merge_entities_from_context(session_id: str, new_message: str) -> str:
+    """
+    Merge previous entities with new message if user is answering incomplete query
+    
+    Returns: Enhanced message with context
+    """
+    try:
+        # Get context
+        context = memory.get_full_context(session_id)
+        
+        # Check if last assistant message was asking for more info (incomplete)
+        if context['conversation_history']:
+            last_messages = context['conversation_history'][-2:]  # Last user + assistant
+            
+            # Check if we recently had an incomplete query
+            if len(last_messages) >= 2:
+                last_assistant_msg = None
+                for msg in reversed(last_messages):
+                    if msg['role'] == 'assistant' and msg.get('metadata', {}).get('is_complete') == False:
+                        last_assistant_msg = msg
+                        break
+                
+                if last_assistant_msg and context['entities']:
+                    # Build context string from previous entities
+                    entities = context['entities']
+                    context_parts = []
+                    
+                    if entities.get('origin'):
+                        context_parts.append(f"Origin: {entities['origin']}")
+                    if entities.get('destination'):
+                        context_parts.append(f"Destination: {entities['destination']}")
+                    if entities.get('date'):
+                        context_parts.append(f"Date: {entities['date']}")
+                    if entities.get('service_type'):
+                        context_parts.append(f"Service: {entities['service_type']}")
+                    
+                    if context_parts:
+                        context_str = " | ".join(context_parts)
+                        enhanced_message = f"[Previous context: {context_str}] {new_message}"
+                        logger.info(f"Enhanced message with context: {enhanced_message}")
+                        return enhanced_message
+        
+        return new_message
+    except Exception as e:
+        logger.warning(f"Could not merge context: {e}")
+        return new_message
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Main chat endpoint with optimized memory storage"""
+    """Main chat endpoint with context-aware incomplete input handling"""
     try:
         # Generate or retrieve session ID
         session_id = request.session_id or str(uuid.uuid4())
@@ -126,19 +179,14 @@ async def chat(request: ChatRequest):
         )
         
         agents_called = []
+        is_complete = True
         
         if request.is_followup:
             # ==================== FOLLOW-UP MODE ====================
             logger.info("📌 MODE: Follow-up query")
             
-            # Get full context (extracts data from agent_outputs automatically)
+            # Get full context
             context = memory.get_full_context(session_id)
-            
-            logger.info(f"📚 Context loaded: "
-                       f"Language={context['language']}, "
-                       f"Entities={len(context['entities'])}, "
-                       f"SearchResults={len(context['search_results'])}, "
-                       f"AgentOutputs={len(context['agent_outputs'])}")
             
             # Create follow-up crew
             crew = create_travel_crew(is_followup=True, context_data=context)
@@ -159,14 +207,17 @@ async def chat(request: ChatRequest):
             
         else:
             # ==================== INITIAL MODE ====================
-            logger.info("📌 MODE: Initial query")
+            logger.info("📌 MODE: Initial query (hierarchical)")
+            
+            # Check if this might be answering a previous incomplete query
+            enhanced_message = merge_entities_from_context(session_id, request.message)
             
             # Create initial crew
             crew = create_travel_crew(is_followup=False)
             
             # Prepare inputs
             inputs = {
-                "user_input": request.message,
+                "user_input": enhanced_message,
                 "session_id": session_id
             }
         
@@ -204,6 +255,13 @@ async def chat(request: ChatRequest):
                             output_data = parsed_json
                             output_type = "json"
                     
+                    # Check if this is the language agent output
+                    if idx == 0 and output_type == "json" and isinstance(output_data, dict):
+                        # Check for incomplete input
+                        if not output_data.get('is_complete', True):
+                            is_complete = False
+                            logger.info("⚠️  Input is INCOMPLETE - follow-up question required")
+                    
                     # Store in database
                     memory.store_agent_output(
                         session_id=session_id,
@@ -224,7 +282,7 @@ async def chat(request: ChatRequest):
         # Extract final response
         response_text = str(result.raw) if hasattr(result, 'raw') else str(result)
         
-        # Get detected language from context (extracted from agent_outputs)
+        # Get detected language from context
         detected_lang = None
         if not request.is_followup:
             context = memory.get_full_context(session_id)
@@ -239,17 +297,19 @@ async def chat(request: ChatRequest):
             metadata={
                 "detected_language": detected_lang,
                 "is_followup": request.is_followup,
+                "is_complete": is_complete,
                 "agents_called": agents_called
             }
         )
         
-        logger.info(f"✅ Request completed - {len(agents_called)} agents called")
+        logger.info(f"✅ Request completed - Complete: {is_complete}, Agents: {len(agents_called)}")
         
         return ChatResponse(
             session_id=session_id,
             response=response_text,
             detected_language=detected_lang,
             is_followup=request.is_followup,
+            is_complete=is_complete,
             agents_called=agents_called,
             status="success"
         )
@@ -287,42 +347,6 @@ async def get_session(session_id: str):
         logger.error(f"Error retrieving session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/session/{session_id}/agents")
-async def get_session_agents(session_id: str):
-    """Get all agent outputs for a session"""
-    try:
-        agent_outputs = memory.get_agent_outputs(session_id)
-        
-        if not agent_outputs:
-            raise HTTPException(status_code=404, detail="No agent outputs found")
-        
-        return {
-            "session_id": session_id,
-            "agent_outputs": agent_outputs,
-            "total_agents_called": len(agent_outputs)
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error retrieving agent outputs: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/session/{session_id}/stats")
-async def get_session_statistics(session_id: str):
-    """Get session statistics"""
-    try:
-        stats = memory.get_session_stats(session_id)
-        
-        if not stats.get('created_at'):
-            raise HTTPException(status_code=404, detail="Session not found")
-        
-        return stats
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting session stats: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.delete("/api/session/{session_id}")
 async def delete_session(session_id: str):
     """Delete a session"""
@@ -335,19 +359,6 @@ async def delete_session(session_id: str):
         logger.error(f"Error deleting session: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/cleanup")
-async def cleanup_old_sessions(days: int = 30):
-    """Cleanup sessions older than specified days"""
-    try:
-        deleted = memory.cleanup_old_sessions(days)
-        return {
-            "message": f"Cleaned up {deleted} old sessions",
-            "deleted_count": deleted
-        }
-    except Exception as e:
-        logger.error(f"Error during cleanup: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
@@ -357,7 +368,6 @@ async def shutdown_event():
 
 if __name__ == "__main__":
     import uvicorn
-    from datetime import datetime
     uvicorn.run(
         app,
         host=settings.API_HOST,
