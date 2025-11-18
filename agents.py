@@ -1,7 +1,7 @@
 # agents.py
 """
 Agent definitions for Multi-Lingual Travel Assistant
-CORRECTED: Proper hierarchical manager setup
+UPDATED: Added booking agent
 """
 
 from crewai import Agent, LLM
@@ -117,7 +117,7 @@ manager_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=True  # MUST be True for hierarchical manager
+    allow_delegation=True
 )
 
 # ==================== AGENT 3A: Flight Search Agent ====================
@@ -134,7 +134,7 @@ flight_agent = Agent(
        - Departure and arrival times
        - Duration and stops
        - Price
-    4. Return top 5 options in JSON format
+    4. Return top 6 options in JSON format
     
     IMPORTANT: Handle EXA's unstructured results by extracting relevant patterns:
     - Prices: Look for ₹, $, USD, INR followed by numbers
@@ -181,7 +181,7 @@ hotel_agent = Agent(
        - Price per night
        - Key amenities
        - Location details
-    4. Return top 5 options in JSON format
+    4. Return top 6 options in JSON format
     
     Output format:
     {
@@ -338,7 +338,7 @@ response_agent = Agent(
 
 followup_agent = Agent(
     role='Follow-up Question Handler',
-    goal='Handle user follow-up questions using stored context',
+    goal='Handle user follow-up questions and detect booking intent',
     backstory="""You handle follow-up questions using complete conversation context.
     
     You receive:
@@ -353,9 +353,43 @@ followup_agent = Agent(
     - "first", "option 1", "पहली", "முதல்" → Index 1
     - "how much", "price", "कितना", "எவ்வளவு" → Price info
     - "what time", "timing", "कब", "என்ன நேரம்" → Timing info
-    - "book it", "reserve", "बुक करो", "பதிவு செய்" → Booking intent
+    - "book it", "reserve", "बुक करो", "பதிவு செய்", "confirm" → BOOKING INTENT
     
-    Answer directly in user's language using context. Be concise and helpful.
+    BOOKING INTENT DETECTION:
+    If user says "book it", "book this", "confirm booking", "I want to book" or similar:
+    - Check if a specific option was referenced (e.g., "book the second one")
+    - Ask for ALL booking details in ONE message in user's language:
+      * Passenger names (all travelers)
+      * Contact number
+      * Email address
+    
+    BOOKING DETAILS TEMPLATES:
+    Hindi: "बुकिंग के लिए कृपया ये जानकारी दें:
+    1. सभी यात्रियों के नाम
+    2. मोबाइल नंबर
+    3. ईमेल पता"
+    
+    Marathi: "बुकिंगसाठी कृपया ही माहिती द्या:
+    1. सर्व प्रवाशांची नावे
+    2. मोबाइल नंबर
+    3. ईमेल पत्ता"
+    
+    English: "To confirm your booking, please provide:
+    1. Names of all passengers
+    2. Contact number
+    3. Email address"
+    
+    Tamil: "முன்பதிவை உறுதிப்படுத்த, தயவுசெய்து வழங்கவும்:
+    1. அனைத்து பயணிகளின் பெயர்கள்
+    2. தொலைபேசி எண்
+    3. மின்னஞ்சல் முகவரி"
+    
+    Bengali: "বুকিং নিশ্চিত করতে অনুগ্রহ করে দিন:
+    1. সমস্ত যাত্রীদের নাম
+    2. মোবাইল নম্বর
+    3. ইমেল ঠিকানা"
+    
+    Otherwise, answer directly in user's language using context. Be concise and helpful.
     
     Return plain text response, NOT JSON.""",
     llm=llm,
@@ -364,4 +398,111 @@ followup_agent = Agent(
     allow_delegation=False
 )
 
-logger.info("All agents initialized successfully (corrected hierarchical setup)")
+# ==================== AGENT 6: Booking Agent ====================
+
+booking_agent = Agent(
+    role='Booking Confirmation Specialist',
+    goal='Generate mock booking confirmations with all details',
+    backstory="""You are a booking specialist who generates realistic booking confirmations.
+    
+    You receive:
+    - Selected service details (flight/hotel/train/bus)
+    - Passenger information (names, contact, email)
+    - User's language
+    
+    Your job:
+    1. Generate a REALISTIC mock booking confirmation
+    2. Include ALL relevant details:
+       
+       FOR FLIGHTS:
+       - PNR Number (6 alphanumeric, e.g., A7B2K9)
+       - Seat Numbers (e.g., 12A, 12B, 12C based on passenger count)
+       - Airline, Flight Number
+       - Route, Date, Timings
+       - Passenger names
+       - Total fare
+       
+       FOR TRAINS:
+       - PNR Number (10 digits, e.g., 2345678901)
+       - Coach and Seat/Berth Numbers (e.g., A1-23, A1-24)
+       - Train name and number
+       - Route, Date, Timings
+       - Class (2AC, 3AC, Sleeper, etc.)
+       - Passenger names
+       - Total fare
+       
+       FOR BUSES:
+       - Booking ID (8 alphanumeric, e.g., BUS12345)
+       - Seat Numbers (e.g., 15, 16, 17)
+       - Bus operator and number
+       - Route, Date, Timings
+       - Seat type (Sleeper/Seater)
+       - Passenger names
+       - Total fare
+       
+       FOR HOTELS:
+       - Booking ID (8 alphanumeric, e.g., HTL98765)
+       - Room Number(s) (e.g., 304, 305)
+       - Room Type (Deluxe, Standard, Suite)
+       - Hotel name and location
+       - Check-in/Check-out dates
+       - Guest names
+       - Number of nights
+       - Total amount
+    
+    3. Format in user's language naturally with proper structure
+    4. Add confirmation message like "Your booking is confirmed!"
+    5. DO NOT ask for payment - this is a MOCK booking
+    
+    EXAMPLE (Hindi - Flight):
+    "✅ बुकिंग कन्फर्म!
+    
+    PNR नंबर: A7B2K9
+    
+    फ्लाइट विवरण:
+    IndiGo 6E-123
+    मुंबई → दिल्ली
+    तारीख: 20 नवंबर 2025
+    समय: 06:00 - 08:30
+    
+    यात्री विवरण:
+    1. राज शर्मा - सीट 12A
+    2. प्रिया शर्मा - सीट 12B
+    
+    संपर्क: +91-9876543210
+    ईमेल: raj@example.com
+    
+    कुल किराया: ₹7,000
+    
+    आपकी बुकिंग सफलतापूर्वक पूरी हो गई है!"
+    
+    Return plain text in user's language, NOT JSON.""",
+    llm=llm,
+    verbose=settings.CREW_VERBOSE,
+    memory=False,
+    allow_delegation=False
+)
+
+# ==================== AGENT 7: Followup Manager Agent ====================
+
+followup_manager_agent = Agent(
+    role='Follow-up Coordinator',
+    goal='Coordinate follow-up questions and booking requests efficiently',
+    backstory="""You are a coordinator managing follow-up interactions:
+    - Follow-up Handler (for general questions)
+    - Booking Specialist (for booking confirmations)
+    
+    Your role is to:
+    1. Analyze the user's request
+    2. If booking details are provided, delegate to Booking Specialist
+    3. Otherwise, delegate to Follow-up Handler
+    4. Ensure smooth coordination
+    
+    You ensure efficient handling of all follow-up interactions.""",
+    llm=llm,
+    verbose=settings.CREW_VERBOSE,
+    memory=False,
+    allow_delegation=True
+)
+
+logger.info("All agents initialized successfully (with booking agent)")

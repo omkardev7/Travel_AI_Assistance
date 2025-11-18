@@ -1,7 +1,7 @@
 # crew.py
 """
 CrewAI orchestration for Multi-Lingual Travel Assistant
-CORRECTED: Proper hierarchical process with manager delegation
+UPDATED: Added hierarchical followup crew with booking
 """
 
 from crewai import Crew, Process
@@ -13,65 +13,86 @@ from agents import (
     transport_agent,
     attractions_agent,
     response_agent,
-    followup_agent
+    followup_agent,
+    booking_agent,
+    followup_manager_agent
 )
 from tasks import (
     task_language_detection,
     task_search,
     task_final_response,
-    task_followup_response
+    task_followup_response,
+    task_booking_confirmation
 )
 from config import settings
 from logger import setup_logger
 
 logger = setup_logger(__name__)
 
-def create_travel_crew(is_followup: bool = False, context_data: dict = None) -> Crew:
+def create_travel_crew(is_followup: bool = False, is_booking: bool = False, context_data: dict = None) -> Crew:
     """
     Create CrewAI crew with hierarchical process
     
-    CORRECTED FLOW:
+    FLOWS:
     
-    INITIAL QUERY (is_followup=False):
+    INITIAL QUERY (is_followup=False, is_booking=False):
         User Input → 
-        Task 1 (Language Agent: detect, translate, extract) →
-        Task 2 (Manager delegates to ONE specialist based on service_type) →
-        Task 3 (Response Agent: translate back to user's language)
-    
-    FOLLOW-UP QUERY (is_followup=True):
-        User Input → 
-        Task 4 (Follow-up Agent: uses custom memory context) →
+        Task 1 (Language Agent) →
+        Task 2 (Manager delegates to specialist) →
+        Task 3 (Response Agent) →
         Response
     
-    KEY CHANGES:
-    1. Manager agent is passed to manager_agent parameter (not as a regular agent)
-    2. All specialist agents are available for delegation
-    3. Single search task - manager routes to appropriate specialist
-    4. NO separate tasks for each specialist
+    FOLLOW-UP QUERY (is_followup=True, is_booking=False):
+        User Input → 
+        Task 4 (Follow-up Agent via manager) →
+        Response
+    
+    BOOKING CONFIRMATION (is_followup=True, is_booking=True):
+        User Input → 
+        Task 5 (Booking Agent via manager) →
+        Response
     
     Args:
         is_followup: Whether this is a follow-up question
-        context_data: Context from custom memory (for follow-ups)
+        is_booking: Whether this is a booking confirmation
+        context_data: Context from custom memory
     
     Returns:
         Configured Crew instance
     """
     
     if is_followup:
-        # ==================== FOLLOW-UP MODE ====================
-        logger.info("Creating crew for FOLLOW-UP query")
-        
-        crew = Crew(
-            agents=[followup_agent],
-            tasks=[task_followup_response],
-            process=Process.sequential,
-            memory=False,  # Using custom SQLite memory
-            verbose=settings.CREW_VERBOSE,
-            full_output=True
-        )
-        
-        logger.info("Follow-up crew created successfully")
-        return crew
+        if is_booking:
+            # ==================== BOOKING MODE ====================
+            logger.info("Creating crew for BOOKING confirmation")
+            
+            crew = Crew(
+                agents=[booking_agent],
+                tasks=[task_booking_confirmation],
+                process=Process.sequential,
+                memory=False,
+                verbose=settings.CREW_VERBOSE,
+                full_output=True
+            )
+            
+            logger.info("Booking crew created successfully")
+            return crew
+        else:
+            # ==================== FOLLOW-UP MODE (HIERARCHICAL) ====================
+            logger.info("Creating crew for FOLLOW-UP query (hierarchical)")
+            
+            crew = Crew(
+                agents=[followup_agent, booking_agent],
+                tasks=[task_followup_response],
+                process=Process.hierarchical,
+                manager_agent=followup_manager_agent,
+                memory=False,
+                verbose=settings.CREW_VERBOSE,
+                full_output=True
+            )
+            
+            logger.info("Follow-up hierarchical crew created successfully")
+            return crew
     
     else:
         # ==================== INITIAL MODE (HIERARCHICAL) ====================
@@ -79,29 +100,26 @@ def create_travel_crew(is_followup: bool = False, context_data: dict = None) -> 
         
         crew = Crew(
             agents=[
-                language_agent,      # Always runs first
-                flight_agent,        # Available for delegation
-                hotel_agent,         # Available for delegation
-                transport_agent,     # Available for delegation
-                attractions_agent,   # Available for delegation
-                response_agent       # Always runs last
+                language_agent,
+                flight_agent,
+                hotel_agent,
+                transport_agent,
+                attractions_agent,
+                response_agent
             ],
             tasks=[
-                task_language_detection,  # Task 1: Detect & translate
-                task_search,              # Task 2: Search (manager delegates)
-                task_final_response       # Task 3: Translate response
+                task_language_detection,
+                task_search,
+                task_final_response
             ],
-            process=Process.hierarchical,    # CRITICAL: Hierarchical mode
-            manager_agent=manager_agent,     # CRITICAL: Manager agent
-            memory=False,                    # Using custom memory
+            process=Process.hierarchical,
+            manager_agent=manager_agent,
+            memory=False,
             verbose=settings.CREW_VERBOSE,
             full_output=True
         )
         
         logger.info("Hierarchical crew created successfully")
-        logger.info("Manager: Travel Services Coordinator")
-        logger.info("Specialists: Flight, Hotel, Transport, Attractions")
-        
         return crew
 
 def kickoff_crew(crew: Crew, inputs: dict) -> str:

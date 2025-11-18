@@ -1,14 +1,15 @@
 # tasks.py
 """
 Task definitions for Multi-Lingual Travel Assistant
-CORRECTED: Single search task, manager routes to appropriate specialist
+UPDATED: Added booking task
 """
 
 from crewai import Task
 from agents import (
     language_agent,
     response_agent,
-    followup_agent
+    followup_agent,
+    booking_agent
 )
 from logger import setup_logger
 from config import settings
@@ -131,7 +132,7 @@ task_search = Task(
     
     Context from language agent: Use the output from the previous task
     """,
-    agent=None,  # Manager will delegate to the appropriate specialist
+    agent=None,
     expected_output="JSON with search results OR status='incomplete' with followup_question",
     context=[task_language_detection]
 )
@@ -172,44 +173,6 @@ task_final_response = Task(
     IMPORTANT: Return plain text in the user's language, NOT JSON.
     Make it conversational and easy to read.
     
-    EXAMPLE OUTPUT (Hindi - Complete):
-    "यहाँ मुंबई से दिल्ली के लिए 5 फ्लाइट्स मिली हैं:
-    
-    1. IndiGo 6E-123
-       प्रस्थान: 06:00 → आगमन: 08:30
-       अवधि: 2 घंटे 30 मिनट
-       कीमत: ₹3,500
-       नॉन-स्टॉप
-    
-    2. SpiceJet SG-456
-       प्रस्थान: 07:15 → आगमन: 09:45
-       अवधि: 2 घंटे 30 मिनट
-       कीमत: ₹3,200
-       नॉन-स्टॉप
-    
-    3. Air India AI-860
-       प्रस्थान: 08:45 → आगमन: 11:00
-       अवधि: 2 घंटे 15 मिनट
-       कीमत: ₹5,100
-       नॉन-स्टॉप
-    
-    4. Vistara UK-955
-       प्रस्थान: 09:30 → आगमन: 11:45
-       अवधि: 2 घंटे 15 मिनट
-       कीमत: ₹4,800
-       नॉन-स्टॉप
-    
-    5. IndiGo 6E-234
-       प्रस्थान: 10:00 → आगमन: 12:30
-       अवधि: 2 घंटे 30 मिनट
-       कीमत: ₹3,300
-       नॉन-स्टॉप
-    
-    क्या आप इनमें से किसी फ्लाइट को बुक करना चाहेंगे?"
-    
-    EXAMPLE OUTPUT (Hindi - Incomplete):
-    "आप कहाँ से यात्रा करना चाहते हैं?"
-    
     Context: Use outputs from Task 1 (language) and Task 2 (search)
     """,
     agent=response_agent,
@@ -221,8 +184,15 @@ task_final_response = Task(
 
 task_followup_response = Task(
     description="""
-    Handle the user's follow-up question using complete conversation context.
-    
+    Handle the user's follow-up question or detect booking intent.
+
+    IMPORTANT RULES:
+    - DO NOT use or rely on your own pre-trained data or world knowledge.
+    - ONLY use the following user-provided inputs: 
+      conversation_history, search_results, agent_outputs, entities, and user_followup_input.
+    - If the information needed to answer the follow-up is NOT present in these inputs, respond with:
+        "No information available for your search."
+
     INPUT: You receive:
     - user_followup_input: {user_followup_input}
     - detected_language: {detected_language}
@@ -231,51 +201,127 @@ task_followup_response = Task(
     - search_results: {search_results}
     - conversation_history: {conversation_history}
     - agent_outputs: {agent_outputs}
-    
+
     PROCESS:
-    1. Understand what the user is asking
-    2. Parse common references:
-       - Numbers: "second", "2nd", "option 2", "दूसरी", "இரண்டாவது" → Index 2
-       - "first", "पहली", "முதல்" → Index 1
-       - "last", "आखिरी", "கடைசி" → Last item
-       - "cheapest", "सबसे सस्ता", "மலிவான" → Sort by price
-       - "earliest", "सबसे पहले", "முதல்" → Sort by time
-    3. Extract relevant information from context:
-       - Use search_results to find specific items
-       - Use entities to understand the original query
-       - Use conversation_history to understand flow
-    4. Provide a concise, helpful answer in the detected language
-    5. If user wants to book, acknowledge and provide next steps
+    1. Detect if this is a BOOKING REQUEST:
+       - Keywords: "book", "reserve", "confirm", "बुक", "பதிவு", etc.
+       - If YES: Ask for booking details (names, contact, email) in user's language
+       - Store the selected option index/details for the booking task
     
-    IMPORTANT: 
-    - Answer directly, don't repeat the entire list
-    - Be conversational and natural
-    - Return plain text in user's language, NOT JSON
-    - If the reference is unclear, politely ask for clarification
+    2. Otherwise, handle as normal follow-up:
+       - Interpret references (second, cheapest, earliest, etc.)
+       - Extract info from search_results
+       - Provide concise answer in user's language
     
-    EXAMPLE FOLLOW-UPS:
+    3. If info is missing: Return "No information available for your search."
     
-    User: "दूसरी वाली के बारे में बताओ" (Tell me about the second one)
-    Response: "दूसरी फ्लाइट SpiceJet SG-456 है:
-    - प्रस्थान: 07:15 से मुंबई
-    - आगमन: 09:45 दिल्ली
-    - अवधि: 2 घंटे 30 मिनट
-    - कीमत: ₹3,200
-    - नॉन-स्टॉप फ्लाइट
-    
-    क्या आप इसे बुक करना चाहेंगे?"
-    
-    User: "सबसे सस्ती कौन सी है?" (Which is the cheapest?)
-    Response: "सबसे सस्ती फ्लाइट SpiceJet SG-456 है जो ₹3,200 में उपलब्ध है। यह 07:15 पर रवाना होती है और 09:45 पर पहुंचती है।"
-    
-    User: "book it"
-    Response: "मैं SpiceJet SG-456 को बुक करने में आपकी मदद करूंगा। कृपया निम्नलिखित जानकारी दें:
-    1. यात्रियों के नाम
-    2. संपर्क नंबर
-    3. ईमेल पता"
+    Return plain text in user's language, NOT JSON.
     """,
     agent=followup_agent,
-    expected_output="Direct, conversational answer to follow-up question in user's original language"
+    expected_output="Direct answer or booking details request in user's language"
 )
 
-logger.info("All tasks defined successfully (corrected hierarchical setup)")
+# ==================== TASK 5: Booking Confirmation ====================
+
+task_booking_confirmation = Task(
+    description="""
+    Generate a complete mock booking confirmation.
+    
+    INPUT: You receive:
+    - user_booking_input: {user_booking_input}
+    - detected_language: {detected_language}
+    - selected_service: {selected_service} (flight/hotel/train/bus details)
+    - passenger_details: {passenger_details} (names, contact, email)
+    - service_type: {service_type} (flight/hotel/train/bus)
+    
+    PROCESS:
+    1. Extract passenger names, contact number, email from user_booking_input
+    2. Generate appropriate booking confirmation based on service_type:
+       
+       FLIGHT: PNR (6 chars), Seat numbers, Flight details
+       TRAIN: PNR (10 digits), Coach-Berth numbers, Train details
+       BUS: Booking ID (8 chars), Seat numbers, Bus details
+       HOTEL: Booking ID (8 chars), Room numbers, Hotel details
+    
+    3. Format in user's language with:
+       - Clear confirmation message
+       - All booking details
+       - Passenger/guest information
+       - Total amount
+       - DO NOT mention payment
+    
+    4. Return plain text in user's language, NOT JSON
+    
+    EXAMPLE FORMATS:
+    
+    Hindi (Flight):
+    "✅ आपकी बुकिंग कन्फर्म हो गई है!
+    
+    PNR: A7B2K9
+    
+    फ्लाइट: IndiGo 6E-123
+    मुंबई → दिल्ली
+    तारीख: 20 नवंबर 2025
+    समय: 06:00 - 08:30
+    
+    यात्री:
+    1. राज शर्मा - सीट 12A
+    2. प्रिया शर्मा - सीट 12B
+    
+    संपर्क: +91-9876543210
+    ईमेल: raj@example.com
+    
+    कुल किराया: ₹7,000"
+    
+    Hindi (Train):
+    "✅ रेल टिकट बुक हो गया!
+    
+    PNR: 2345678901
+    
+    ट्रेन: Mumbai Rajdhani 12952
+    मुंबई → दिल्ली
+    तारीख: 20 नवंबर 2025
+    समय: 16:55 - 08:35
+    
+    यात्री:
+    1. राज शर्मा - A1-23 (Lower Berth)
+    2. प्रिया शर्मा - A1-24 (Upper Berth)
+    
+    क्लास: 2AC
+    
+    संपर्क: +91-9876543210
+    ईमेल: raj@example.com
+    
+    कुल किराया: ₹3,370"
+    
+    Hindi (Hotel):
+    "✅ होटल बुकिंग कन्फर्म!
+    
+    बुकिंग ID: HTL98765
+    
+    होटल: Hotel Taj
+    स्थान: Gateway of India, Mumbai
+    
+    रूम नंबर: 304, 305
+    रूम टाइप: Deluxe Room
+    
+    चेक-इन: 20 नवंबर 2025
+    चेक-आउट: 22 नवंबर 2025
+    रातें: 2
+    
+    मेहमान:
+    1. राज शर्मा
+    2. प्रिया शर्मा
+    
+    संपर्क: +91-9876543210
+    ईमेल: raj@example.com
+    
+    कुल राशि: ₹10,000"
+    
+    Return plain text in user's language, NOT JSON.
+    """,
+    agent=booking_agent,
+    expected_output="Complete mock booking confirmation in user's language"
+)
+
+logger.info("All tasks defined successfully (with booking task)")
