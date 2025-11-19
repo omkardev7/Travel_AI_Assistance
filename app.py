@@ -1,8 +1,5 @@
 # app.py
-"""
-Multi-Lingual Travel Assistant - Streamlit Frontend
-UPDATED: Toggle-based follow-up mode with 5-minute timeout
-"""
+
 
 import streamlit as st
 import requests

@@ -1,9 +1,3 @@
-# main.py
-"""
-Multi-Lingual Travel Assistant - FastAPI Application
-UPDATED: Added booking functionality
-"""
-
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -82,7 +76,6 @@ async def health_check():
     }
 
 def extract_json_from_text(text: str) -> Optional[dict]:
-    """Extract JSON from text that might contain markdown or other content"""
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -107,11 +100,7 @@ def extract_json_from_text(text: str) -> Optional[dict]:
     return None
 
 def merge_entities_from_context(session_id: str, new_message: str) -> str:
-    """
-    Merge previous entities with new message if user is answering incomplete query
-    
-    Returns: Enhanced message with context
-    """
+
     try:
         context = memory.get_full_context(session_id)
         
@@ -150,11 +139,7 @@ def merge_entities_from_context(session_id: str, new_message: str) -> str:
         return new_message
 
 def detect_booking_intent(message: str, context: dict) -> tuple[bool, dict]:
-    """
-    Detect if user wants to book and has provided booking details
-    
-    Returns: (is_booking, booking_data)
-    """
+
     message_lower = message.lower()
     
     # Check for booking keywords in multiple languages
@@ -214,7 +199,6 @@ def detect_booking_intent(message: str, context: dict) -> tuple[bool, dict]:
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Main chat endpoint with booking functionality"""
     try:
         session_id = request.session_id or str(uuid.uuid4())
         
@@ -390,7 +374,6 @@ async def chat(request: ChatRequest):
 
 @app.get("/api/session/{session_id}")
 async def get_session(session_id: str):
-    """Get complete session information"""
     try:
         context = memory.get_full_context(session_id)
         
@@ -428,7 +411,7 @@ async def delete_session(session_id: str):
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup on shutdown"""
+
     logger.info("Shutting down application...")
     memory.close()
     logger.info("Memory manager closed")

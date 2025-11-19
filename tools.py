@@ -1,9 +1,3 @@
-# tools.py
-"""
-Tools configuration for Multi-Lingual Travel Assistant
-Configures EXA Search Tool with required parameters
-"""
-
 from crewai_tools import EXASearchTool
 from config import settings
 from logger import setup_logger
@@ -11,17 +5,7 @@ from logger import setup_logger
 logger = setup_logger(__name__)
 
 def get_exa_tool() -> EXASearchTool:
-    """
-    Configure EXA Search Tool with required parameters
-    
-    As per EXASearchTool documentation:
-    - content=True: Get full content
-    - summary=True: Get AI-generated summaries (REQUIRED)
-    - type="auto": Auto-detect search type
-    
-    Returns:
-        Configured EXASearchTool instance
-    """
+
     logger.info("Initializing EXA Search Tool")
     
     try:
@@ -37,5 +21,5 @@ def get_exa_tool() -> EXASearchTool:
         logger.error(f"Failed to initialize EXA Search Tool: {str(e)}")
         raise
 
-# Create singleton instance
+
 exa_tool = get_exa_tool()

@@ -1,9 +1,3 @@
-# agents.py
-"""
-Agent definitions for Multi-Lingual Travel Assistant
-UPDATED: Added booking agent
-"""
-
 from crewai import Agent, LLM
 from config import settings
 from tools import exa_tool
@@ -497,6 +491,7 @@ followup_manager_agent = Agent(
     2. If booking details are provided, delegate to Booking Specialist
     3. Otherwise, delegate to Follow-up Handler
     4. Ensure smooth coordination
+    5. Return text in user's language.
     
     You ensure efficient handling of all follow-up interactions.""",
     llm=llm,

@@ -1,9 +1,3 @@
-# tasks.py
-"""
-Task definitions for Multi-Lingual Travel Assistant
-UPDATED: Added booking task
-"""
-
 from crewai import Task
 from agents import (
     language_agent,
@@ -244,6 +238,7 @@ task_booking_confirmation = Task(
        HOTEL: Booking ID (8 chars), Room numbers, Hotel details
     
     3. Format in user's language with:
+       - 
        - Clear confirmation message
        - All booking details
        - Passenger/guest information
@@ -321,7 +316,8 @@ task_booking_confirmation = Task(
     Return plain text in user's language, NOT JSON.
     """,
     agent=booking_agent,
-    expected_output="Complete mock booking confirmation in user's language"
+    expected_output="Complete mock booking confirmation in user's language",
+    context=[task_followup_response]
 )
 
 logger.info("All tasks defined successfully (with booking task)")

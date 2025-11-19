@@ -1,9 +1,3 @@
-# memory_manager.py
-"""
-Custom SQLite-based memory manager for Multi-Lingual Travel Assistant
-OPTIMIZED: Only essential tables - sessions, messages, and agent_outputs
-"""
-
 import sqlite3
 import json
 from datetime import datetime
@@ -15,15 +9,9 @@ logger = setup_logger(__name__)
 
 
 class TravelMemoryManager:
-    """Optimized SQLite-based memory manager with minimal tables"""
-    
+
     def __init__(self, db_path: str = "travel_memory.db"):
-        """
-        Initialize memory manager with SQLite database
         
-        Args:
-            db_path: Path to SQLite database file
-        """
         self.db_path = db_path
         self.conn = None
         self._initialize_database()
@@ -93,16 +81,7 @@ class TravelMemoryManager:
         logger.info("Database initialized with 3 essential tables: sessions, messages, agent_outputs")
     
     def create_session(self, session_id: str, metadata: Optional[Dict] = None) -> bool:
-        """
-        Create a new session
-        
-        Args:
-            session_id: Unique session identifier
-            metadata: Optional metadata dictionary
-        
-        Returns:
-            True if successful
-        """
+
         try:
             cursor = self.conn.cursor()
             metadata_json = json.dumps(metadata) if metadata else "{}"
@@ -126,18 +105,7 @@ class TravelMemoryManager:
         content: str,
         metadata: Optional[Dict] = None
     ) -> bool:
-        """
-        Add a message to the conversation history
-        
-        Args:
-            session_id: Session identifier
-            role: 'user' or 'assistant'
-            content: Message content
-            metadata: Optional metadata (detected_language, is_followup, etc.)
-        
-        Returns:
-            True if successful
-        """
+
         try:
             cursor = self.conn.cursor()
             metadata_json = json.dumps(metadata) if metadata else None
@@ -168,19 +136,7 @@ class TravelMemoryManager:
         output_data: Any,
         output_type: str = "json"
     ) -> bool:
-        """
-        Store output from individual agents
-        
-        Args:
-            session_id: Session identifier
-            agent_name: Name of agent
-            task_name: Task name
-            output_data: The agent's output (dict, list, or string)
-            output_type: 'json' or 'text'
-        
-        Returns:
-            True if successful
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -209,16 +165,7 @@ class TravelMemoryManager:
         session_id: str,
         agent_name: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Retrieve agent outputs for a session
-        
-        Args:
-            session_id: Session identifier
-            agent_name: Optional filter by specific agent name
-        
-        Returns:
-            List of agent output dictionaries
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -269,16 +216,7 @@ class TravelMemoryManager:
         session_id: str,
         agent_name: str
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get the most recent output from a specific agent
-        
-        Args:
-            session_id: Session identifier
-            agent_name: Name of the agent
-        
-        Returns:
-            Latest output dictionary or None
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -319,16 +257,7 @@ class TravelMemoryManager:
         session_id: str,
         limit: int = 10
     ) -> List[Dict[str, Any]]:
-        """
-        Get conversation history for a session
-        
-        Args:
-            session_id: Session identifier
-            limit: Maximum number of messages to retrieve
-        
-        Returns:
-            List of message dictionaries
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -368,16 +297,7 @@ class TravelMemoryManager:
             return []
     
     def get_full_context(self, session_id: str) -> Dict[str, Any]:
-        """
-        Get complete context for a session
-        Extracts structured data from agent_outputs
-        
-        Args:
-            session_id: Session identifier
-        
-        Returns:
-            Dictionary with all context information extracted from agent outputs
-        """
+
         # Get raw data
         agent_outputs = self.get_agent_outputs(session_id)
         conversation_history = self.get_conversation_history(session_id, limit=10)
@@ -443,15 +363,7 @@ class TravelMemoryManager:
         return context
     
     def clear_session(self, session_id: str) -> bool:
-        """
-        Clear all data for a session
-        
-        Args:
-            session_id: Session identifier
-        
-        Returns:
-            True if successful
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -467,15 +379,7 @@ class TravelMemoryManager:
             return False
     
     def get_session_stats(self, session_id: str) -> Dict[str, Any]:
-        """
-        Get statistics for a session
-        
-        Args:
-            session_id: Session identifier
-        
-        Returns:
-            Dictionary with session statistics
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -509,15 +413,7 @@ class TravelMemoryManager:
             return {}
     
     def cleanup_old_sessions(self, days: int = 30) -> int:
-        """
-        Delete sessions older than specified days
-        
-        Args:
-            days: Number of days to keep
-        
-        Returns:
-            Number of sessions deleted
-        """
+
         try:
             cursor = self.conn.cursor()
             
@@ -538,13 +434,13 @@ class TravelMemoryManager:
             return 0
     
     def close(self):
-        """Close database connection"""
+
         if self.conn:
             self.conn.close()
             logger.info("Database connection closed")
     
     def __del__(self):
-        """Cleanup on object destruction"""
+
         self.close()
 
 
