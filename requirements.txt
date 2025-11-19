@@ -16,6 +16,7 @@ google-generativeai
 requests
 httpx
 exa_py
+streamlit
 
 # Optional: Development Tools
 pytest
