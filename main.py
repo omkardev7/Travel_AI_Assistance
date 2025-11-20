@@ -138,67 +138,9 @@ def merge_entities_from_context(session_id: str, new_message: str) -> str:
         logger.warning(f"Could not merge context: {e}")
         return new_message
 
-def detect_booking_intent(message: str, context: dict) -> tuple[bool, dict]:
-
-    message_lower = message.lower()
-    
-    # Check for booking keywords in multiple languages
-    booking_keywords = [
-        'book', 'reserve', 'confirm', 'बुक', 'करो', 'बुकिंग', 
-        'பதிவு', 'செய்', 'রিজার্ভ', 'নিশ্চিত', 'बुकिंग', 'करा'
-    ]
-    
-    has_booking_intent = any(keyword in message_lower for keyword in booking_keywords)
-    
-    if not has_booking_intent:
-        return False, {}
-    
-    # Check if booking details are provided (names, contact, email)
-    has_names = any(word in message_lower for word in ['name', 'नाम', 'பெயர்', 'नाव'])
-    has_contact = any(char.isdigit() for char in message) and len([c for c in message if c.isdigit()]) >= 10
-    has_email = '@' in message or 'email' in message_lower or 'ईमेल' in message_lower
-    
-    # If user has provided booking details, extract them
-    if has_names or has_contact or has_email:
-        # Get the selected service from search results
-        selected_service = None
-        if context.get('search_results'):
-            # Try to find which option was selected from conversation
-            for msg in reversed(context.get('conversation_history', [])):
-                if msg['role'] == 'user':
-                    msg_content = msg['content'].lower()
-                    # Check for option references
-                    for i, keyword in enumerate(['first', 'second', 'third', 'fourth', 'fifth', 
-                                                  'पहली', 'दूसरी', 'तीसरी', 'चौथी', 'पांचवीं',
-                                                  '1', '2', '3', '4', '5']):
-                        if keyword in msg_content:
-                            # Get the corresponding result
-                            for result_set in context['search_results']:
-                                results_key = list(result_set['results'])[0] if isinstance(result_set['results'], dict) else 'results'
-                                if isinstance(result_set['results'], list) and len(result_set['results']) > 0:
-                                    if i < len(result_set['results']):
-                                        selected_service = result_set['results'][i]
-                                        break
-                            break
-                    if selected_service:
-                        break
-            
-            # If no specific selection, use the first result from most recent search
-            if not selected_service and context['search_results']:
-                latest_results = context['search_results'][-1]
-                if latest_results.get('results') and isinstance(latest_results['results'], list):
-                    selected_service = latest_results['results'][0]
-        
-        return True, {
-            'selected_service': selected_service,
-            'passenger_details': message,
-            'service_type': context.get('entities', {}).get('service_type', 'flight')
-        }
-    
-    return False, {}
-
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
+    """Main chat endpoint - SIMPLIFIED"""
     try:
         session_id = request.session_id or str(uuid.uuid4())
         
@@ -222,49 +164,29 @@ async def chat(request: ChatRequest):
         
         agents_called = []
         is_complete = True
-        is_booking = False
+        is_booking = False  # Will be detected from agent outputs
         
         if request.is_followup:
+            # ==================== FOLLOW-UP MODE ====================
+            logger.info("📌 MODE: Follow-up query (manager decides routing)")
+            
             # Get full context
             context = memory.get_full_context(session_id)
             
-            # Detect booking intent
-            is_booking, booking_data = detect_booking_intent(request.message, context)
+            # Create hierarchical crew (manager decides follow-up vs booking)
+            crew = create_travel_crew(is_followup=True)
             
-            if is_booking and booking_data.get('selected_service'):
-                # ==================== BOOKING MODE ====================
-                logger.info("📌 MODE: Booking confirmation")
-                
-                crew = create_travel_crew(is_followup=True, is_booking=True)
-                
-                inputs = {
-                    "user_booking_input": request.message,
-                    "detected_language": context['language']['detected_language'] if context['language'] else "en",
-                    "selected_service": json.dumps(booking_data['selected_service'], ensure_ascii=False),
-                    "passenger_details": booking_data['passenger_details'],
-                    "service_type": booking_data['service_type']
-                }
-                
-                agents_called.append("booking agent")
-                
-            else:
-                # ==================== FOLLOW-UP MODE ====================
-                logger.info("📌 MODE: Follow-up query")
-                
-                crew = create_travel_crew(is_followup=True, is_booking=False)
-                
-                inputs = {
-                    "user_followup_input": request.message,
-                    "session_id": session_id,
-                    "detected_language": context['language']['detected_language'] if context['language'] else "en",
-                    "language_name": context['language']['language_name'] if context['language'] else "English",
-                    "entities": json.dumps(context['entities'], ensure_ascii=False),
-                    "search_results": json.dumps(context['search_results'], ensure_ascii=False),
-                    "conversation_history": json.dumps(context['conversation_history'][-5:], ensure_ascii=False),
-                    "agent_outputs": json.dumps(context['agent_outputs'], ensure_ascii=False)
-                }
-                
-                agents_called.append("follow-up handler")
+            # Prepare inputs
+            inputs = {
+                "user_followup_input": request.message,
+                "session_id": session_id,
+                "detected_language": context['language']['detected_language'] if context['language'] else "en",
+                "language_name": context['language']['language_name'] if context['language'] else "English",
+                "entities": json.dumps(context['entities'], ensure_ascii=False),
+                "search_results": json.dumps(context['search_results'], ensure_ascii=False),
+                "conversation_history": json.dumps(context['conversation_history'][-5:], ensure_ascii=False),
+                "agent_outputs": json.dumps(context['agent_outputs'], ensure_ascii=False)
+            }
             
         else:
             # ==================== INITIAL MODE ====================
@@ -272,7 +194,7 @@ async def chat(request: ChatRequest):
             
             enhanced_message = merge_entities_from_context(session_id, request.message)
             
-            crew = create_travel_crew(is_followup=False, is_booking=False)
+            crew = create_travel_crew(is_followup=False)
             
             inputs = {
                 "user_input": enhanced_message,
@@ -310,7 +232,13 @@ async def chat(request: ChatRequest):
                             output_data = parsed_json
                             output_type = "json"
                     
-                    if idx == 0 and output_type == "json" and isinstance(output_data, dict):
+                    # Detect booking from agent name
+                    if 'booking' in agent_name.lower():
+                        is_booking = True
+                        logger.info("🎫 Booking agent was called - this is a booking confirmation")
+                    
+                    # Check completeness (only for initial query)
+                    if idx == 0 and not request.is_followup and output_type == "json" and isinstance(output_data, dict):
                         if not output_data.get('is_complete', True):
                             is_complete = False
                             logger.info("⚠️  Input is INCOMPLETE - follow-up question required")

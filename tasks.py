@@ -174,20 +174,24 @@ task_final_response = Task(
     context=[task_language_detection, task_search]
 )
 
-# ==================== TASK 4: Follow-up Response ====================
+# ==================== TASK 4: Follow-up Handling (REFACTORED) ====================
 
-task_followup_response = Task(
+task_followup_handling = Task(
     description="""
-    Handle the user's follow-up question or detect booking intent.
-
-    IMPORTANT RULES:
-    - DO NOT use or rely on your own pre-trained data or world knowledge.
-    - ONLY use the following user-provided inputs: 
-      conversation_history, search_results, agent_outputs, entities, and user_followup_input.
-    - If the information needed to answer the follow-up is NOT present in these inputs, respond with:
-        "No information available for your search."
-
-    INPUT: You receive:
+    Handle the user's follow-up question OR booking request.
+    
+    The Follow-up Manager will analyze the request and delegate to the appropriate specialist:
+    - Follow-up Handler: For general questions about search results
+    - Booking Agent: For booking confirmations
+    
+    IMPORTANT RULES FOR ALL AGENTS:
+    - DO NOT use pre-trained data or world knowledge
+    - ONLY use user-provided inputs: conversation_history, search_results, 
+      agent_outputs, entities, and user_followup_input
+    - If information needed is NOT in these inputs, respond: 
+      "No information available for your search."
+    
+    INPUT VARIABLES:
     - user_followup_input: {user_followup_input}
     - detected_language: {detected_language}
     - language_name: {language_name}
@@ -195,129 +199,152 @@ task_followup_response = Task(
     - search_results: {search_results}
     - conversation_history: {conversation_history}
     - agent_outputs: {agent_outputs}
-
-    PROCESS:
-    1. Detect if this is a BOOKING REQUEST:
-       - Keywords: "book", "reserve", "confirm", "बुक", "பதிவு", etc.
-       - If YES: Ask for booking details (names, contact, email) in user's language
-       - Store the selected option index/details for the booking task
     
-    2. Otherwise, handle as normal follow-up:
-       - Interpret references (second, cheapest, earliest, etc.)
-       - Extract info from search_results
-       - Provide concise answer in user's language
+    ROUTING LOGIC (Manager decides):
     
-    3. If info is missing: Return "No information available for your search."
+    The manager will analyze the user_followup_input and determine:
+    
+    1. **BOOKING REQUEST DETECTION**:
+       - Keywords: "book", "reserve", "confirm", "बुक", "பதிவு", "বুকিং", etc.
+       - Has passenger details: names, contact number, email
+       - Has reference to specific option: "first", "second", "option 2", etc.
+       → Delegate to Booking Agent
+    
+    2. **GENERAL FOLLOW-UP QUESTION**:
+       - Questions about prices: "how much", "कितना", "எவ்வளவு"
+       - Questions about details: "timing", "when", "कब"
+       - Comparisons: "cheapest", "fastest", "सबसे सस्ती"
+       - Option references: "first one", "second", "दूसरी"
+       → Delegate to Follow-up Handler
+    
+    3. **MISSING INFORMATION**:
+       - No relevant data in search_results or context
+       → Respond: "No information available for your search."
+    
+    EXPECTED OUTPUTS:
+    
+    **From Follow-up Handler:**
+    - Plain text answer in user's language
+    - Extracted from search_results context
+    - Concise and direct
+    
+    **From Booking Agent:**
+    - If booking details are complete:
+      * Full booking confirmation in user's language
+      * Include PNR/Booking ID, seats/rooms, passenger details
+    - If booking details are incomplete:
+      * Request for missing details (names, contact, email) in user's language
+    
+    Manager: Coordinate the appropriate specialist based on request type.
     
     Return plain text in user's language, NOT JSON.
     """,
-    agent=followup_agent,
-    expected_output="Direct answer or booking details request in user's language"
+    agent=None,  # Manager delegates
+    expected_output="Direct answer, booking details request, or booking confirmation in user's language"
 )
-
 # ==================== TASK 5: Booking Confirmation ====================
 
-task_booking_confirmation = Task(
-    description="""
-    Generate a complete mock booking confirmation.
+# task_booking_confirmation = Task(
+#     description="""
+#     Generate a complete mock booking confirmation.
     
-    INPUT: You receive:
-    - user_booking_input: {user_booking_input}
-    - detected_language: {detected_language}
-    - selected_service: {selected_service} (flight/hotel/train/bus details)
-    - passenger_details: {passenger_details} (names, contact, email)
-    - service_type: {service_type} (flight/hotel/train/bus)
+#     INPUT: You receive:
+#     - user_booking_input: {user_booking_input}
+#     - detected_language: {detected_language}
+#     - selected_service: {selected_service} (flight/hotel/train/bus details)
+#     - passenger_details: {passenger_details} (names, contact, email)
+#     - service_type: {service_type} (flight/hotel/train/bus)
     
-    PROCESS:
-    1. Extract passenger names, contact number, email from user_booking_input
-    2. Generate appropriate booking confirmation based on service_type:
+#     PROCESS:
+#     1. Extract passenger names, contact number, email from user_booking_input
+#     2. Generate appropriate booking confirmation based on service_type:
        
-       FLIGHT: PNR (6 chars), Seat numbers, Flight details
-       TRAIN: PNR (10 digits), Coach-Berth numbers, Train details
-       BUS: Booking ID (8 chars), Seat numbers, Bus details
-       HOTEL: Booking ID (8 chars), Room numbers, Hotel details
+#        FLIGHT: PNR (6 chars), Seat numbers, Flight details
+#        TRAIN: PNR (10 digits), Coach-Berth numbers, Train details
+#        BUS: Booking ID (8 chars), Seat numbers, Bus details
+#        HOTEL: Booking ID (8 chars), Room numbers, Hotel details
     
-    3. Format in user's language with:
-       - 
-       - Clear confirmation message
-       - All booking details
-       - Passenger/guest information
-       - Total amount
-       - DO NOT mention payment
+#     3. Format in user's language with:
+#        - 
+#        - Clear confirmation message
+#        - All booking details
+#        - Passenger/guest information
+#        - Total amount
+#        - DO NOT mention payment
     
-    4. Return plain text in user's language, NOT JSON
+#     4. Return plain text in user's language, NOT JSON
     
-    EXAMPLE FORMATS:
+#     EXAMPLE FORMATS:
     
-    Hindi (Flight):
-    "✅ आपकी बुकिंग कन्फर्म हो गई है!
+#     Hindi (Flight):
+#     "✅ आपकी बुकिंग कन्फर्म हो गई है!
     
-    PNR: A7B2K9
+#     PNR: A7B2K9
     
-    फ्लाइट: IndiGo 6E-123
-    मुंबई → दिल्ली
-    तारीख: 20 नवंबर 2025
-    समय: 06:00 - 08:30
+#     फ्लाइट: IndiGo 6E-123
+#     मुंबई → दिल्ली
+#     तारीख: 20 नवंबर 2025
+#     समय: 06:00 - 08:30
     
-    यात्री:
-    1. राज शर्मा - सीट 12A
-    2. प्रिया शर्मा - सीट 12B
+#     यात्री:
+#     1. राज शर्मा - सीट 12A
+#     2. प्रिया शर्मा - सीट 12B
     
-    संपर्क: +91-9876543210
-    ईमेल: raj@example.com
+#     संपर्क: +91-9876543210
+#     ईमेल: raj@example.com
     
-    कुल किराया: ₹7,000"
+#     कुल किराया: ₹7,000"
     
-    Hindi (Train):
-    "✅ रेल टिकट बुक हो गया!
+#     Hindi (Train):
+#     "✅ रेल टिकट बुक हो गया!
     
-    PNR: 2345678901
+#     PNR: 2345678901
     
-    ट्रेन: Mumbai Rajdhani 12952
-    मुंबई → दिल्ली
-    तारीख: 20 नवंबर 2025
-    समय: 16:55 - 08:35
+#     ट्रेन: Mumbai Rajdhani 12952
+#     मुंबई → दिल्ली
+#     तारीख: 20 नवंबर 2025
+#     समय: 16:55 - 08:35
     
-    यात्री:
-    1. राज शर्मा - A1-23 (Lower Berth)
-    2. प्रिया शर्मा - A1-24 (Upper Berth)
+#     यात्री:
+#     1. राज शर्मा - A1-23 (Lower Berth)
+#     2. प्रिया शर्मा - A1-24 (Upper Berth)
     
-    क्लास: 2AC
+#     क्लास: 2AC
     
-    संपर्क: +91-9876543210
-    ईमेल: raj@example.com
+#     संपर्क: +91-9876543210
+#     ईमेल: raj@example.com
     
-    कुल किराया: ₹3,370"
+#     कुल किराया: ₹3,370"
     
-    Hindi (Hotel):
-    "✅ होटल बुकिंग कन्फर्म!
+#     Hindi (Hotel):
+#     "✅ होटल बुकिंग कन्फर्म!
     
-    बुकिंग ID: HTL98765
+#     बुकिंग ID: HTL98765
     
-    होटल: Hotel Taj
-    स्थान: Gateway of India, Mumbai
+#     होटल: Hotel Taj
+#     स्थान: Gateway of India, Mumbai
     
-    रूम नंबर: 304, 305
-    रूम टाइप: Deluxe Room
+#     रूम नंबर: 304, 305
+#     रूम टाइप: Deluxe Room
     
-    चेक-इन: 20 नवंबर 2025
-    चेक-आउट: 22 नवंबर 2025
-    रातें: 2
+#     चेक-इन: 20 नवंबर 2025
+#     चेक-आउट: 22 नवंबर 2025
+#     रातें: 2
     
-    मेहमान:
-    1. राज शर्मा
-    2. प्रिया शर्मा
+#     मेहमान:
+#     1. राज शर्मा
+#     2. प्रिया शर्मा
     
-    संपर्क: +91-9876543210
-    ईमेल: raj@example.com
+#     संपर्क: +91-9876543210
+#     ईमेल: raj@example.com
     
-    कुल राशि: ₹10,000"
+#     कुल राशि: ₹10,000"
     
-    Return plain text in user's language, NOT JSON.
-    """,
-    agent=booking_agent,
-    expected_output="Complete mock booking confirmation in user's language",
-    context=[task_followup_response]
-)
+#     Return plain text in user's language, NOT JSON.
+#     """,
+#     agent=booking_agent,
+#     expected_output="Complete mock booking confirmation in user's language",
+#     context=[task_followup_handling]
+# )
 
-logger.info("All tasks defined successfully (with booking task)")
+# logger.info("All tasks defined successfully (with booking task)")

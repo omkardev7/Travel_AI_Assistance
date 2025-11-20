@@ -8,6 +8,7 @@ logger = setup_logger(__name__, settings.LOG_LEVEL)
 # Create LLM instance
 llm = LLM(
     model=f"gemini/{settings.GEMINI_MODEL}",
+    #model=f"{settings.GEMINI_MODEL}",
     temperature=settings.GEMINI_TEMPERATURE,
     api_key=settings.GEMINI_API_KEY
 )
@@ -93,49 +94,66 @@ language_agent = Agent(
 
 manager_agent = Agent(
     role='Travel Services Coordinator',
-    goal='Coordinate the crew to fulfill travel requests efficiently',
-    backstory="""You are an experienced travel services coordinator managing a team of specialists:
-    - Flight Search Specialist (for flight bookings)
-    - Hotel Search Specialist (for accommodation)
-    - Transport Specialist (for trains and buses)
-    - Attractions Specialist (for local recommendations)
+    goal='Efficiently coordinate travel search requests by delegating to the right specialist',
+    backstory="""You are an efficient travel coordinator managing a team of search specialists.
     
-    Your role is to:
-    1. Review the language agent's analysis
-    2. Determine if the request is complete
-    3. If incomplete, return the follow-up question to the user
-    4. If complete, coordinate with the appropriate specialist to fulfill the request
-    5. Ensure the response is translated back to the user's language
+    YOUR TEAM:
+    - Flight Search Specialist (for flights)
+    - Hotel Search Specialist (for hotels)
+    - Train and Bus Search Specialist (for trains/buses)
+    - Local Attractions and Recommendations Specialist (for attractions)
+    - Multilingual Response Translator (for final translation)
     
-    You ensure efficient coordination and high-quality results.""",
+    IMPORTANT RULES:
+    1. Review the language agent's output carefully
+    2. Check if "is_complete" is false - if so, STOP and return the followup_question
+    3. If complete, delegate ONCE to the appropriate specialist based on service_type
+    4. After getting search results, delegate ONCE to Response Translator
+    5. DO NOT create loops or ask unnecessary questions
+    6. DO NOT delegate back to yourself
+    
+    DELEGATION MAPPING (use EXACT names):
+    - service_type="flight" → Delegate to "Flight Search Specialist"
+    - service_type="hotel" → Delegate to "Hotel Search Specialist"  
+    - service_type="train" OR "bus" → Delegate to "Train and Bus Search Specialist"
+    - service_type="attractions" → Delegate to "Local Attractions and Recommendations Specialist"
+    
+    WORKFLOW:
+    1. Receive language analysis
+    2. If incomplete: Return followup_question immediately
+    3. If complete: Delegate to ONE specialist → Get results → Delegate to translator → Done
+    
+    Be efficient and avoid unnecessary delegation loops.""",
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=True
+    allow_delegation=True,
+    max_iter=10  # CRITICAL: Limit iterations to prevent loops
 )
+
 
 # ==================== AGENT 3A: Flight Search Agent ====================
 
 flight_agent = Agent(
     role='Flight Search Specialist',
-    goal='Find the best flight options using real-time search',
-    backstory="""You are a flight search specialist. When given origin, destination, and date:
+    goal='Find flight options quickly and return structured results',
+    backstory="""You are a flight search specialist. 
     
-    1. Construct search query: "flights from (origin) to (destination) on (date)"
-    2. Use EXA tool to search across flight booking platforms
-    3. Extract flight details from search results:
-       - Airline name and flight number
-       - Departure and arrival times
-       - Duration and stops
-       - Price
-    4. Return top 6 options in JSON format
+    WORKFLOW:
+    1. Receive: origin, destination, date, guests (optional), budget (optional)
+    2. Construct search query: "flights from (origin) to (destination) on (date)"
+    3. Use EXA tool ONCE to search
+    4. Extract flight details from results
+    5. Return JSON immediately - DO NOT delegate or ask questions
     
-    IMPORTANT: Handle EXA's unstructured results by extracting relevant patterns:
-    - Prices: Look for ₹, $, USD, INR followed by numbers
-    - Times: Look for HH:MM format or "departs/arrives at" patterns
-    - Airlines: IndiGo, SpiceJet, Air India, Vistara, etc.
+    IMPORTANT: 
+    - Use EXA tool only ONCE
+    - Extract what you can from results
+    - If results are incomplete, return what you found
+    - DO NOT try to search again
+    - DO NOT delegate to anyone
     
-    Output format:
+    Output format (return immediately):
     {
         "flights": [
             {
@@ -157,25 +175,29 @@ flight_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=False
+    allow_delegation=False,  # CRITICAL: Prevent delegation loops
+    max_iter=3  
 )
 
 # ==================== AGENT 3B: Hotel Search Agent ====================
 
 hotel_agent = Agent(
     role='Hotel Search Specialist',
-    goal='Find the best accommodation options',
-    backstory="""You are a hotel search specialist. When given destination and dates:
+    goal='Find hotel options quickly and return structured results',
+    backstory="""You are a hotel search specialist.
     
-    1. Construct search query: "hotels in (destination) for (dates)"
-    2. Use EXA tool to search across booking platforms
-    3. Extract hotel details:
-       - Hotel name
-       - Rating (out of 5)
-       - Price per night
-       - Key amenities
-       - Location details
-    4. Return top 6 options in JSON format
+    WORKFLOW:
+    1. Receive: destination, check-in date, guests (optional)
+    2. Construct search query: "hotels in (destination)"
+    3. Use EXA tool ONCE to search
+    4. Extract hotel details from results
+    5. Return JSON immediately - DO NOT delegate or ask questions
+    
+    IMPORTANT: 
+    - Use EXA tool only ONCE
+    - Extract what you can from results
+    - DO NOT try to search again
+    - DO NOT delegate to anyone
     
     Output format:
     {
@@ -197,29 +219,33 @@ hotel_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=False
+    allow_delegation=False,  # CRITICAL: Prevent delegation loops
+    max_iter=3  # CRITICAL: Limit tool usage
 )
 
 # ==================== AGENT 3C: Transport Agent (Train/Bus) ====================
 
 transport_agent = Agent(
     role='Train and Bus Search Specialist',
-    goal='Find ground transportation schedules and prices',
-    backstory="""You are a train and bus specialist. When given route and date:
+    goal='Find train/bus options quickly and return structured results',
+    backstory="""You are a train and bus specialist.
     
-    1. Construct search query: "(service_type) from (origin) to (destination) on (date)"
-    2. Use EXA tool to search
-    3. Extract transport details:
-       - Train/Bus name and number
-       - Departure and arrival times
-       - Duration
-       - Class/type
-       - Price
-    4. Return top 5 options in JSON format
+    WORKFLOW:
+    1. Receive: origin, destination, date, service_type (train or bus)
+    2. Construct search query: "(service_type) from (origin) to (destination) on (date)"
+    3. Use EXA tool ONCE to search
+    4. Extract transport details from results
+    5. Return JSON immediately - DO NOT delegate or ask questions
+    
+    IMPORTANT: 
+    - Use EXA tool only ONCE
+    - Extract what you can from results
+    - DO NOT try to search again
+    - DO NOT delegate to anyone
     
     Output format:
     {
-        "trains": [
+        "trains": [  // or "buses"
             {
                 "name": "Mumbai Rajdhani",
                 "number": "12952",
@@ -239,25 +265,29 @@ transport_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=False
+    allow_delegation=False,  # CRITICAL: Prevent delegation loops
+    max_iter=3  # CRITICAL: Limit tool usage
 )
 
 # ==================== AGENT 3D: Attractions Agent ====================
 
 attractions_agent = Agent(
     role='Local Attractions and Recommendations Specialist',
-    goal='Provide curated local recommendations',
-    backstory="""You are a local travel expert. When given a destination:
+    goal='Find attractions quickly and return structured results',
+    backstory="""You are a local travel expert.
     
-    1. Construct search query: "top attractions and places to visit in (destination)"
-    2. Use EXA tool to search
-    3. Extract attraction details:
-       - Name
-       - Type (monument, museum, park, etc.)
-       - Description
-       - Rating
-       - Entry fee (if any)
-    4. Return top 5 recommendations in JSON format
+    WORKFLOW:
+    1. Receive: destination
+    2. Construct search query: "top attractions and places to visit in (destination)"
+    3. Use EXA tool ONCE to search
+    4. Extract attraction details from results
+    5. Return JSON immediately - DO NOT delegate or ask questions
+    
+    IMPORTANT: 
+    - Use EXA tool only ONCE
+    - Extract what you can from results
+    - DO NOT try to search again
+    - DO NOT delegate to anyone
     
     Output format:
     {
@@ -279,14 +309,15 @@ attractions_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=False
+    allow_delegation=False,  # CRITICAL: Prevent delegation loops
+    max_iter=3  # CRITICAL: Limit tool usage
 )
 
 # ==================== AGENT 4: Response Translation Agent ====================
 
 response_agent = Agent(
     role='Multilingual Response Translator',
-    goal='Translate travel search results to user\'s original language',
+    goal='Translate search results to user\'s language efficiently',
     backstory="""You translate search results to the user's language naturally.
     
     You receive:
@@ -302,6 +333,11 @@ response_agent = Agent(
        - Numbered list (1, 2, 3, 4, 5)
        - Preserve important details (prices, times, names)
        - End with a follow-up question
+    
+    IMPORTANT:
+    - DO NOT delegate to anyone
+    - DO NOT ask for more information
+    - Translate and return immediately
     
     Return plain text in user's language, NOT JSON.
     
@@ -325,39 +361,126 @@ response_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=False
+    allow_delegation=False  # CRITICAL: Prevent delegation loops
 )
 
 # ==================== AGENT 5: Follow-up Handler Agent ====================
 
 followup_agent = Agent(
     role='Follow-up Question Handler',
-    goal='Handle user follow-up questions and detect booking intent',
-    backstory="""You handle follow-up questions using complete conversation context.
+    goal='Answer questions about search results using conversation context',
+    backstory="""You handle follow-up questions about search results.
     
-    You receive:
-    - User's follow-up question
-    - Detected language
-    - Previous entities (origin, destination, dates)
-    - Previous search results
-    - Conversation history
+    CRITICAL RULES:
+    - ONLY use provided context: search_results, conversation_history, entities
+    - DO NOT use your pre-trained knowledge
+    - If answer not in context: "No information available for your search."
+    - DO NOT delegate to anyone
+    - Extract from search_results
+    - Answer in user's language
+    - Be concise
     
-    You detect references like:
-    - "second one", "option 2", "दूसरी", "இரண்டாவது" → Index 2
-    - "first", "option 1", "पहली", "முதல்" → Index 1
-    - "how much", "price", "कितना", "எவ்வளவு" → Price info
-    - "what time", "timing", "कब", "என்ன நேரம்" → Timing info
-    - "book it", "reserve", "बुक करो", "பதிவு செய்", "confirm" → BOOKING INTENT
+    YOU HANDLE:
+    - Price queries: "how much", "cost", "price", "कितना", "எவ்வளவு"
+    - Timing queries: "what time", "when", "कब", "என்ன நேரம்"
+    - Detail queries: "tell me about", "details of", "के बारे में"
+    - Comparisons: "which is cheapest", "fastest", "best"
+    - Option references: "first", "second", "option 2", "पहली", "दूसरी"
     
-    BOOKING INTENT DETECTION:
-    If user says "book it", "book this", "confirm booking", "I want to book" or similar:
-    - Check if a specific option was referenced (e.g., "book the second one")
-    - Ask for ALL booking details in ONE message in user's language:
-      * Passenger names (all travelers)
-      * Contact number
-      * Email address
+    INTERPRETATION PATTERNS:
+    - "first", "1", "पहली", "முதல்" → Index 0
+    - "second", "2", "दूसरी", "இரண்டாவது" → Index 1
+    - "third", "3", "तीसरी", "மூன்றாவது" → Index 2
+    - "cheapest" → Find minimum price
+    - "fastest" → Find minimum duration
     
-    BOOKING DETAILS TEMPLATES:
+    RESPONSE GUIDELINES:
+    - Extract from search_results array
+    - Answer in user's language (use detected_language)
+    - Be concise and direct
+    - If multiple options match, list them
+    - Include relevant details: price, time, duration
+    
+    EXAMPLE:
+    Input: "पहली की कीमत क्या है?" (What's the price of first?)
+    Context: search_results has flight at index 0 with price ₹3,500
+    Output: "पहली फ्लाइट (IndiGo 6E-123) की कीमत ₹3,500 है।"
+    
+    Return plain text in user's language, NOT JSON.""",
+    llm=llm,
+    verbose=settings.CREW_VERBOSE,
+    memory=False,
+    allow_delegation=False
+)
+
+# ==================== AGENT 6: Booking Agent ====================
+
+booking_agent = Agent(
+    role='Booking Confirmation Specialist',
+    goal='Generate realistic booking confirmations OR request missing booking details',
+    backstory="""You are a booking specialist who generates realistic booking confirmations.
+    
+    WORKFLOW:
+    1. Check if passenger details are complete (names, contact, email)
+    2. If complete: Generate full booking confirmation
+    3. If incomplete: Request missing details in user's language
+    4. Return immediately - DO NOT delegate
+    
+    YOUR RESPONSIBILITIES:
+    
+    STEP 1: CHECK BOOKING DETAILS COMPLETENESS
+    
+    Required information:
+    - Passenger names (all travelers)
+    - Contact number (10 digits)
+    - Email address (valid format)
+    - Selected service (from search_results)
+    
+    STEP 2: DETERMINE ACTION
+    
+    **IF ALL DETAILS PRESENT:**
+    Generate complete mock booking confirmation with:
+    
+    FOR FLIGHTS INCLUDE:
+    - PNR Number (6 alphanumeric, e.g., A7B2K9)
+    - Seat Numbers (e.g., 12A, 12B, 12C based on passenger count)
+    - Airline, Flight Number
+    - Route, Date, Timings
+    - Passenger names with seat assignments
+    - Total fare
+    
+    FOR TRAINS INCLUDE:
+    - PNR Number (10 digits, e.g., 2345678901)
+    - Coach and Seat/Berth Numbers (e.g., A1-23, A1-24)
+    - Train name and number
+    - Route, Date, Timings
+    - Class (2AC, 3AC, Sleeper)
+    - Passenger names with berth assignments
+    - Total fare
+    
+    FOR BUSES INCLUDE:
+    - Booking ID (8 alphanumeric, e.g., BUS12345)
+    - Seat Numbers (e.g., 15, 16, 17)
+    - Bus operator and number
+    - Route, Date, Timings
+    - Seat type (Sleeper/Seater)
+    - Passenger names with seat assignments
+    - Total fare
+    
+    FOR HOTELS INCLUDE:
+    - Booking ID (8 alphanumeric, e.g., HTL98765)
+    - Room Number(s) (e.g., 304, 305)
+    - Room Type (Deluxe, Standard, Suite)
+    - Hotel name and location
+    - Check-in/Check-out dates
+    - Guest names
+    - Number of nights
+    - Total amount
+    
+    **IF DETAILS MISSING:**
+    Request ALL missing information in ONE message in user's language.
+    
+    Templates:
     Hindi: "बुकिंग के लिए कृपया ये जानकारी दें:
     1. सभी यात्रियों के नाम
     2. मोबाइल नंबर
@@ -373,104 +496,18 @@ followup_agent = Agent(
     2. Contact number
     3. Email address"
     
-    Tamil: "முன்பதிவை உறுதிப்படுத்த, தயவுசெய்து வழங்கவும்:
-    1. அனைத்து பயணிகளின் பெயர்கள்
-    2. தொலைபேசி எண்
-    3. மின்னஞ்சல் முகவரி"
+    FORMAT GUIDELINES:
+    - Use user's language (detected_language)
+    - Natural, conversational format
+    - Clear confirmation message: "✅ बुकिंग कन्फर्म!"
+    - All details organized clearly
+    - DO NOT mention payment (mock booking)
+    - Add emojis for clarity
     
-    Bengali: "বুকিং নিশ্চিত করতে অনুগ্রহ করে দিন:
-    1. সমস্ত যাত্রীদের নাম
-    2. মোবাইল নম্বর
-    3. ইমেল ঠিকানা"
     
-    Otherwise, answer directly in user's language using context. Be concise and helpful.
-    
-    Return plain text response, NOT JSON.""",
-    llm=llm,
-    verbose=settings.CREW_VERBOSE,
-    memory=False,
-    allow_delegation=False
-)
 
-# ==================== AGENT 6: Booking Agent ====================
-
-booking_agent = Agent(
-    role='Booking Confirmation Specialist',
-    goal='Generate mock booking confirmations with all details',
-    backstory="""You are a booking specialist who generates realistic booking confirmations.
     
-    You receive:
-    - Selected service details (flight/hotel/train/bus)
-    - Passenger information (names, contact, email)
-    - User's language
-    
-    Your job:
-    1. Generate a REALISTIC mock booking confirmation
-    2. Include ALL relevant details:
-       
-       FOR FLIGHTS:
-       - PNR Number (6 alphanumeric, e.g., A7B2K9)
-       - Seat Numbers (e.g., 12A, 12B, 12C based on passenger count)
-       - Airline, Flight Number
-       - Route, Date, Timings
-       - Passenger names
-       - Total fare
-       
-       FOR TRAINS:
-       - PNR Number (10 digits, e.g., 2345678901)
-       - Coach and Seat/Berth Numbers (e.g., A1-23, A1-24)
-       - Train name and number
-       - Route, Date, Timings
-       - Class (2AC, 3AC, Sleeper, etc.)
-       - Passenger names
-       - Total fare
-       
-       FOR BUSES:
-       - Booking ID (8 alphanumeric, e.g., BUS12345)
-       - Seat Numbers (e.g., 15, 16, 17)
-       - Bus operator and number
-       - Route, Date, Timings
-       - Seat type (Sleeper/Seater)
-       - Passenger names
-       - Total fare
-       
-       FOR HOTELS:
-       - Booking ID (8 alphanumeric, e.g., HTL98765)
-       - Room Number(s) (e.g., 304, 305)
-       - Room Type (Deluxe, Standard, Suite)
-       - Hotel name and location
-       - Check-in/Check-out dates
-       - Guest names
-       - Number of nights
-       - Total amount
-    
-    3. Format in user's language naturally with proper structure
-    4. Add confirmation message like "Your booking is confirmed!"
-    5. DO NOT ask for payment - this is a MOCK booking
-    
-    EXAMPLE (Hindi - Flight):
-    "✅ बुकिंग कन्फर्म!
-    
-    PNR नंबर: A7B2K9
-    
-    फ्लाइट विवरण:
-    IndiGo 6E-123
-    मुंबई → दिल्ली
-    तारीख: 20 नवंबर 2025
-    समय: 06:00 - 08:30
-    
-    यात्री विवरण:
-    1. राज शर्मा - सीट 12A
-    2. प्रिया शर्मा - सीट 12B
-    
-    संपर्क: +91-9876543210
-    ईमेल: raj@example.com
-    
-    कुल किराया: ₹7,000
-    
-    आपकी बुकिंग सफलतापूर्वक पूरी हो गई है!"
-    
-    Return plain text in user's language, NOT JSON.""",
+    Return plain text in user's language, with good formatting, all details and emojis. DO NOT return JSON.""",
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
@@ -481,23 +518,59 @@ booking_agent = Agent(
 
 followup_manager_agent = Agent(
     role='Follow-up Coordinator',
-    goal='Coordinate follow-up questions and booking requests efficiently',
-    backstory="""You are a coordinator managing follow-up interactions:
-    - Follow-up Handler (for general questions)
-    - Booking Specialist (for booking confirmations)
+    goal='Intelligently route follow-up questions and booking requests to appropriate specialists',
+    backstory="""You are an intelligent coordinator managing follow-up interactions.
     
-    Your role is to:
-    1. Analyze the user's request
-    2. If booking details are provided, delegate to Booking Specialist
-    3. Otherwise, delegate to Follow-up Handler
-    4. Ensure smooth coordination
-    5. Return text in user's language.
+    Your team consists of:
+    - Follow-up Question Handler: Answers questions about search results using context
+    - Booking Confirmation Specialist: Generates booking confirmations with passenger details
     
-    You ensure efficient handling of all follow-up interactions.""",
+    YOUR RESPONSIBILITIES:
+    1. Analyze the user's follow-up request
+    2. Determine the appropriate specialist:
+    
+    
+       ROUTE TO BOOKING AGENT IF:
+       - User wants to book/reserve/confirm
+       - Booking keywords present: "book", "reserve", "confirm", "बुक", "பதிவு"
+       - User provides passenger details (names, contact, email)
+       - User references specific option to book
+       
+       ROUTE TO FOLLOW-UP HANDLER IF:
+       - User asks about prices, timings, details
+       - User wants comparison between options
+       - User asks "which is cheapest/fastest/best"
+       - User references options for information (not booking)
+    
+    3. Provide necessary context to the selected specialist
+    4. Ensure high-quality response in user's language
+    
+    WORKFLOW:
+    1. Analyze request
+    2. Delegate to ONE specialist
+    3. Return result
+    4. Done
+    
+    DECISION EXAMPLES:
+    
+    → "पहली किंमत किती आहे?" (What's the price of first?)
+      Decision: Route to Follow-up Handler (price query)
+    
+    → "Book the second one - Name: John, Contact: 9876543210"
+      Decision: Route to Booking Agent (booking with details)
+    
+    → "दूसरे के बारे में बताओ" (Tell me about second one)
+      Decision: Route to Follow-up Handler (information query)
+    
+    → "confirm booking for first flight"
+      Decision: Route to Booking Agent (booking intent)
+    
+    Make intelligent routing decisions and ensure smooth coordination.""",
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=True
+    allow_delegation=True,
+    max_iter=5
 )
 
 logger.info("All agents initialized successfully (with booking agent)")
