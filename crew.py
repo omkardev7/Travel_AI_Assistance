@@ -15,7 +15,7 @@ from tasks import (
     task_language_detection,
     task_search,
     task_final_response,
-    task_followup_handling,  # RENAMED: was task_followup_response
+    task_followup_handling, 
 )
 from config import settings
 from logger import setup_logger
@@ -101,16 +101,7 @@ def create_travel_crew(is_followup: bool = False, context_data: dict = None) -> 
         return crew
 
 def kickoff_crew(crew: Crew, inputs: dict) -> str:
-    """
-    Execute crew with inputs and return final output
-    
-    Args:
-        crew: Configured Crew instance
-        inputs: Input dictionary for the crew
-    
-    Returns:
-        Final output string from the crew
-    """
+   
     try:
         logger.info(f"Kicking off crew with inputs: {list(inputs.keys())}")
         result = crew.kickoff(inputs=inputs)

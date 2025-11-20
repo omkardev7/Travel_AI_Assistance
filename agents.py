@@ -18,7 +18,7 @@ logger.info(f"Initialized LLM: gemini/{settings.GEMINI_MODEL}")
 # ==================== AGENT 1: Language & Gateway Agent ====================
 
 language_agent = Agent(
-    role='Language Detection and Translation Specialist',
+    role='language_detection_and_translation_specialist',
     goal='Detect user language, translate to English, validate travel queries, and extract entities',
     backstory="""You are an expert linguist who can instantly detect any language.
     You translate queries to English while preserving intent and context.
@@ -93,7 +93,7 @@ language_agent = Agent(
 # ==================== AGENT 2: Manager Agent (SIMPLIFIED) ====================
 
 manager_agent = Agent(
-    role='Travel Services Coordinator',
+    role='travel_services_coordinator',
     goal='Efficiently coordinate travel search requests by delegating to the right specialist',
     backstory="""You are an efficient travel coordinator managing a team of search specialists.
     
@@ -128,14 +128,14 @@ manager_agent = Agent(
     verbose=settings.CREW_VERBOSE,
     memory=False,
     allow_delegation=True,
-    max_iter=10  # CRITICAL: Limit iterations to prevent loops
+    max_iter=5  # CRITICAL: Limit iterations to prevent loops
 )
 
 
 # ==================== AGENT 3A: Flight Search Agent ====================
 
 flight_agent = Agent(
-    role='Flight Search Specialist',
+    role='flight_search_specialist',
     goal='Find flight options quickly and return structured results',
     backstory="""You are a flight search specialist. 
     
@@ -176,13 +176,14 @@ flight_agent = Agent(
     verbose=settings.CREW_VERBOSE,
     memory=False,
     allow_delegation=False,  # CRITICAL: Prevent delegation loops
-    max_iter=3  
+    max_iter=3,
+  
 )
 
 # ==================== AGENT 3B: Hotel Search Agent ====================
 
 hotel_agent = Agent(
-    role='Hotel Search Specialist',
+    role='hotel_search_specialist',
     goal='Find hotel options quickly and return structured results',
     backstory="""You are a hotel search specialist.
     
@@ -226,7 +227,7 @@ hotel_agent = Agent(
 # ==================== AGENT 3C: Transport Agent (Train/Bus) ====================
 
 transport_agent = Agent(
-    role='Train and Bus Search Specialist',
+    role='train_and_bus_search_specialist',
     goal='Find train/bus options quickly and return structured results',
     backstory="""You are a train and bus specialist.
     
@@ -272,7 +273,7 @@ transport_agent = Agent(
 # ==================== AGENT 3D: Attractions Agent ====================
 
 attractions_agent = Agent(
-    role='Local Attractions and Recommendations Specialist',
+    role='local_attractions_and_recommendations_specialist',
     goal='Find attractions quickly and return structured results',
     backstory="""You are a local travel expert.
     
@@ -316,7 +317,7 @@ attractions_agent = Agent(
 # ==================== AGENT 4: Response Translation Agent ====================
 
 response_agent = Agent(
-    role='Multilingual Response Translator',
+    role='multilingual_response_translator',
     goal='Translate search results to user\'s language efficiently',
     backstory="""You translate search results to the user's language naturally.
     
@@ -367,7 +368,7 @@ response_agent = Agent(
 # ==================== AGENT 5: Follow-up Handler Agent ====================
 
 followup_agent = Agent(
-    role='Follow-up Question Handler',
+    role='followup_question_handler',
     goal='Answer questions about search results using conversation context',
     backstory="""You handle follow-up questions about search results.
     
@@ -416,7 +417,7 @@ followup_agent = Agent(
 # ==================== AGENT 6: Booking Agent ====================
 
 booking_agent = Agent(
-    role='Booking Confirmation Specialist',
+    role='booking_confirmation_specialist',
     goal='Generate realistic booking confirmations OR request missing booking details',
     backstory="""You are a booking specialist who generates realistic booking confirmations.
     
@@ -517,7 +518,7 @@ booking_agent = Agent(
 # ==================== AGENT 7: Followup Manager Agent ====================
 
 followup_manager_agent = Agent(
-    role='Follow-up Coordinator',
+    role='followup_coordinator',
     goal='Intelligently route follow-up questions and booking requests to appropriate specialists',
     backstory="""You are an intelligent coordinator managing follow-up interactions.
     

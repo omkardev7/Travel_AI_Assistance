@@ -100,10 +100,10 @@ task_search = Task(
     
     **IF is_complete is TRUE:**
     - Based on service_type, the appropriate specialist will be assigned:
-      * service_type="flight" → Flight Search Specialist handles this
-      * service_type="hotel" → Hotel Search Specialist handles this
-      * service_type="train" or "bus" → Transport Specialist handles this
-      * service_type="attractions" → Attractions Specialist handles this
+      * service_type="flight" → "flight_search_specialist" handles this
+      * service_type="hotel" → "hotel_search_specialist" handles this
+      * service_type="train" or "bus" → "train_and_bus_search_specialist" handles this
+      * service_type="attractions" → "local_attractions_and_recommendations_specialist" handles this
     
     - The specialist will:
       1. Build a search query from entities
@@ -181,8 +181,9 @@ task_followup_handling = Task(
     Handle the user's follow-up question OR booking request.
     
     The Follow-up Manager will analyze the request and delegate to the appropriate specialist:
-    - Follow-up Handler: For general questions about search results
-    - Booking Agent: For booking confirmations
+    YOUR TEAM OF SPECIALISTS:
+    - "followup_question_handler": For general questions about search results
+    - "booking_confirmation_specialist": For booking confirmations
     
     IMPORTANT RULES FOR ALL AGENTS:
     - DO NOT use pre-trained data or world knowledge
@@ -240,7 +241,8 @@ task_followup_handling = Task(
     Return plain text in user's language, NOT JSON.
     """,
     agent=None,  # Manager delegates
-    expected_output="Direct answer, booking details request, or booking confirmation in user's language"
+    expected_output="Direct answer, booking details request, or booking confirmation in user's language",
+    context=[task_language_detection, task_search,task_final_response]
 )
 # ==================== TASK 5: Booking Confirmation ====================
 
