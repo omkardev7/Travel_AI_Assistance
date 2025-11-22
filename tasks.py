@@ -3,7 +3,8 @@ from agents import (
     language_agent,
     response_agent,
     followup_agent,
-    booking_agent
+    booking_agent,
+    manager_agent
 )
 from logger import setup_logger
 from config import settings
@@ -75,6 +76,12 @@ task_language_detection = Task(
     }}
     
     User input: {user_input}
+    
+    FINAL INSTRUCTION:
+    Once you have the JSON output, your job is DONE. 
+    Simply return the JSON object as your final answer.
+    DO NOT attempt to communicate with the 'travel_manager'.
+    DO NOT use the 'Delegate work to coworker' tool to send this to the manager.
     """,
     agent=language_agent,
     expected_output="Valid JSON object with language detection, translation, entity extraction, and completeness check"
@@ -100,22 +107,22 @@ task_search = Task(
     
     **IF is_complete is TRUE:**
     - Based on service_type, the appropriate specialist will be assigned:
-      * service_type="flight" → "flight_search_specialist" handles this
-      * service_type="hotel" → "hotel_search_specialist" handles this
-      * service_type="train" or "bus" → "train_and_bus_search_specialist" handles this
-      * service_type="attractions" → "local_attractions_and_recommendations_specialist" handles this
+      * service_type="flight" → "flight_agent" handles this
+      * service_type="hotel" → "hotel_agent" handles this
+      * service_type="train" or "bus" → "train_and_bus_agent" handles this
+      * service_type="attractions" → "local_attractions_agent" handles this
     
     - The specialist will:
       1. Build a search query from entities
       2. Use EXA tool to search relevant platforms
       3. Extract and structure results
-      4. Return top 5 options in JSON format
+      4. Return top 6 options in JSON format
     
     Expected output (if complete):
     {{
         "flights": [...],  // or "hotels", "trains", "buses", "attractions"
         "search_query": "flights from Mumbai to Delhi tomorrow",
-        "result_count": 5
+        "result_count": 6
     }}
     
     Expected output (if incomplete):
@@ -126,7 +133,7 @@ task_search = Task(
     
     Context from language agent: Use the output from the previous task
     """,
-    agent=None,
+    agent=manager_agent,
     expected_output="JSON with search results OR status='incomplete' with followup_question",
     context=[task_language_detection]
 )
@@ -168,6 +175,13 @@ task_final_response = Task(
     Make it conversational and easy to read.
     
     Context: Use outputs from Task 1 (language) and Task 2 (search)
+    
+    CRITICAL COORDINATION RULES (TO PREVENT ERRORS):
+    1. The 'travel_manager' is your SUPERVISOR, NOT a coworker. 
+    2. DO NOT attempt to delegate this task back to 'travel_manager'.
+    3. DO NOT use the 'Delegate work to coworker' tool on 'travel_manager'.
+    4. Your job is to simply RETURN the final translated text string as your output.
+    5. Do not ask the manager for confirmation; just produce the best translation you can.
     """,
     agent=response_agent,
     expected_output="Natural language response translated to user's original language",
@@ -182,8 +196,8 @@ task_followup_handling = Task(
     
     The Follow-up Manager will analyze the request and delegate to the appropriate specialist:
     YOUR TEAM OF SPECIALISTS:
-    - "followup_question_handler": For general questions about search results
-    - "booking_confirmation_specialist": For booking confirmations
+    - "followup_question_agent": For general questions about search results
+    - "booking_confirmation_agent": For booking confirmations
     
     IMPORTANT RULES FOR ALL AGENTS:
     - DO NOT use pre-trained data or world knowledge
@@ -244,109 +258,6 @@ task_followup_handling = Task(
     expected_output="Direct answer, booking details request, or booking confirmation in user's language",
     context=[task_language_detection, task_search,task_final_response]
 )
-# ==================== TASK 5: Booking Confirmation ====================
 
-# task_booking_confirmation = Task(
-#     description="""
-#     Generate a complete mock booking confirmation.
-    
-#     INPUT: You receive:
-#     - user_booking_input: {user_booking_input}
-#     - detected_language: {detected_language}
-#     - selected_service: {selected_service} (flight/hotel/train/bus details)
-#     - passenger_details: {passenger_details} (names, contact, email)
-#     - service_type: {service_type} (flight/hotel/train/bus)
-    
-#     PROCESS:
-#     1. Extract passenger names, contact number, email from user_booking_input
-#     2. Generate appropriate booking confirmation based on service_type:
-       
-#        FLIGHT: PNR (6 chars), Seat numbers, Flight details
-#        TRAIN: PNR (10 digits), Coach-Berth numbers, Train details
-#        BUS: Booking ID (8 chars), Seat numbers, Bus details
-#        HOTEL: Booking ID (8 chars), Room numbers, Hotel details
-    
-#     3. Format in user's language with:
-#        - 
-#        - Clear confirmation message
-#        - All booking details
-#        - Passenger/guest information
-#        - Total amount
-#        - DO NOT mention payment
-    
-#     4. Return plain text in user's language, NOT JSON
-    
-#     EXAMPLE FORMATS:
-    
-#     Hindi (Flight):
-#     "✅ आपकी बुकिंग कन्फर्म हो गई है!
-    
-#     PNR: A7B2K9
-    
-#     फ्लाइट: IndiGo 6E-123
-#     मुंबई → दिल्ली
-#     तारीख: 20 नवंबर 2025
-#     समय: 06:00 - 08:30
-    
-#     यात्री:
-#     1. राज शर्मा - सीट 12A
-#     2. प्रिया शर्मा - सीट 12B
-    
-#     संपर्क: +91-9876543210
-#     ईमेल: raj@example.com
-    
-#     कुल किराया: ₹7,000"
-    
-#     Hindi (Train):
-#     "✅ रेल टिकट बुक हो गया!
-    
-#     PNR: 2345678901
-    
-#     ट्रेन: Mumbai Rajdhani 12952
-#     मुंबई → दिल्ली
-#     तारीख: 20 नवंबर 2025
-#     समय: 16:55 - 08:35
-    
-#     यात्री:
-#     1. राज शर्मा - A1-23 (Lower Berth)
-#     2. प्रिया शर्मा - A1-24 (Upper Berth)
-    
-#     क्लास: 2AC
-    
-#     संपर्क: +91-9876543210
-#     ईमेल: raj@example.com
-    
-#     कुल किराया: ₹3,370"
-    
-#     Hindi (Hotel):
-#     "✅ होटल बुकिंग कन्फर्म!
-    
-#     बुकिंग ID: HTL98765
-    
-#     होटल: Hotel Taj
-#     स्थान: Gateway of India, Mumbai
-    
-#     रूम नंबर: 304, 305
-#     रूम टाइप: Deluxe Room
-    
-#     चेक-इन: 20 नवंबर 2025
-#     चेक-आउट: 22 नवंबर 2025
-#     रातें: 2
-    
-#     मेहमान:
-#     1. राज शर्मा
-#     2. प्रिया शर्मा
-    
-#     संपर्क: +91-9876543210
-#     ईमेल: raj@example.com
-    
-#     कुल राशि: ₹10,000"
-    
-#     Return plain text in user's language, NOT JSON.
-#     """,
-#     agent=booking_agent,
-#     expected_output="Complete mock booking confirmation in user's language",
-#     context=[task_followup_handling]
-# )
 
-# logger.info("All tasks defined successfully (with booking task)")
+logger.info("All tasks defined successfully (with booking task)")

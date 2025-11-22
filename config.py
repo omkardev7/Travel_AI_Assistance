@@ -1,4 +1,3 @@
-
 import os
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -27,7 +26,7 @@ class Settings(BaseSettings):
     CREWAI_TRACING_ENABLED: bool = False
     
     # LLM Settings - Use correct Gemini model format
-    GEMINI_MODEL: str = "gemini-2.5-flash-lite"
+    GEMINI_MODEL: str = "gemini-2.5-flash"
     GEMINI_TEMPERATURE: float = 0.7
     
     # EXA Settings

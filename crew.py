@@ -23,32 +23,6 @@ from logger import setup_logger
 logger = setup_logger(__name__)
 
 def create_travel_crew(is_followup: bool = False, context_data: dict = None) -> Crew:
-    """
-    Create CrewAI crew with hierarchical process
-    
-    SIMPLIFIED FLOWS:
-    
-    INITIAL QUERY (is_followup=False):
-        User Input → 
-        Task 1 (Language Agent) →
-        Task 2 (Manager delegates to specialist) →
-        Task 3 (Response Agent) →
-        Response
-    
-    FOLLOW-UP QUERY (is_followup=True):
-        User Input → 
-        Task 4 (Follow-up Manager delegates to Follow-up Agent OR Booking Agent) →
-        Response
-    
-    Manager agents make all routing decisions - NO hardcoded logic!
-    
-    Args:
-        is_followup: Whether this is a follow-up question
-        context_data: Context from custom memory (not used in crew creation)
-    
-    Returns:
-        Configured Crew instance
-    """
     
     if is_followup:
         # ==================== FOLLOW-UP MODE (PURE HIERARCHICAL) ====================
@@ -66,7 +40,7 @@ def create_travel_crew(is_followup: bool = False, context_data: dict = None) -> 
             manager_agent=followup_manager_agent,  # Manager makes all decisions
             memory=False,
             verbose=settings.CREW_VERBOSE,
-            full_output=True
+            max_rpm=10
         )
         
         logger.info("Follow-up hierarchical crew created successfully")
@@ -90,11 +64,11 @@ def create_travel_crew(is_followup: bool = False, context_data: dict = None) -> 
                 task_search,
                 task_final_response
             ],
-            process=Process.hierarchical,
+            process=Process.sequential,
             manager_agent=manager_agent,
             memory=False,
             verbose=settings.CREW_VERBOSE,
-            full_output=True
+            max_rpm=10
         )
         
         logger.info("Hierarchical crew created successfully")

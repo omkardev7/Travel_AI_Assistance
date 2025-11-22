@@ -1,6 +1,6 @@
 from crewai import Agent, LLM
 from config import settings
-from tools import exa_tool
+from tools2 import exa_tool
 from logger import setup_logger
 
 logger = setup_logger(__name__, settings.LOG_LEVEL)
@@ -10,7 +10,12 @@ llm = LLM(
     model=f"gemini/{settings.GEMINI_MODEL}",
     #model=f"{settings.GEMINI_MODEL}",
     temperature=settings.GEMINI_TEMPERATURE,
-    api_key=settings.GEMINI_API_KEY
+    api_key=settings.GEMINI_API_KEY,
+    safety_settings=[
+        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
+        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
+    ]
 )
 
 logger.info(f"Initialized LLM: gemini/{settings.GEMINI_MODEL}")
@@ -18,7 +23,7 @@ logger.info(f"Initialized LLM: gemini/{settings.GEMINI_MODEL}")
 # ==================== AGENT 1: Language & Gateway Agent ====================
 
 language_agent = Agent(
-    role='language_detection_and_translation_specialist',
+    role='input_parser',
     goal='Detect user language, translate to English, validate travel queries, and extract entities',
     backstory="""You are an expert linguist who can instantly detect any language.
     You translate queries to English while preserving intent and context.
@@ -83,6 +88,7 @@ language_agent = Agent(
     English: "Please provide complete information in one message: Where are you traveling from and to, when (date), how many people, what service do you need (flight/train/bus/hotel), and your budget?"
     
     Bengali: "অনুগ্রহ করে সম্পূর্ণ তথ্য একসাথে দিন: আপনি কোথা থেকে কোথায় যাচ্ছেন, কবে (তারিখ), কতজন ভ্রমণ করছেন, কোন সেবা প্রয়োজন (ফ্লাইট/ট্রেন/বাস/হোটেল), এবং আপনার বাজেট কত?"
+    
     """,
     llm=llm,
     verbose=settings.CREW_VERBOSE,
@@ -93,30 +99,39 @@ language_agent = Agent(
 # ==================== AGENT 2: Manager Agent (SIMPLIFIED) ====================
 
 manager_agent = Agent(
-    role='travel_services_coordinator',
+    role='travel_manager',
     goal='Efficiently coordinate travel search requests by delegating to the right specialist',
     backstory="""You are an efficient travel coordinator managing a team of search specialists.
     
     YOUR TEAM:
-    - Flight Search Specialist (for flights)
-    - Hotel Search Specialist (for hotels)
-    - Train and Bus Search Specialist (for trains/buses)
-    - Local Attractions and Recommendations Specialist (for attractions)
-    - Multilingual Response Translator (for final translation)
+    - flight_agent (for flights)
+    - hotel_agent (for hotels)
+    - train_and_bus_agent (for trains/buses)
+    - local_attractions_agent (for attractions)
     
     IMPORTANT RULES:
     1. Review the language agent's output carefully
     2. Check if "is_complete" is false - if so, STOP and return the followup_question
     3. If complete, delegate ONCE to the appropriate specialist based on service_type
     4. After getting search results, delegate ONCE to Response Translator
-    5. DO NOT create loops or ask unnecessary questions
-    6. DO NOT delegate back to yourself
+    5. When using the 'Delegate work to coworker' tool, the 'task' argument MUST be a PLAIN STRING.
+        CORRECT Usage:
+        task="Find flights from Mumbai to Delhi"
+    
+        INCORRECT Usage (DO NOT DO THIS):
+        task={"description": "Find flights...", "type": "str"}  <-- NEVER SEND DICTIONARIES!
+        
+        If you send a dictionary/JSON object for the 'task' argument, the system will crash.
+        ALWAYS send a simple text string.
     
     DELEGATION MAPPING (use EXACT names):
-    - service_type="flight" → Delegate to "Flight Search Specialist"
-    - service_type="hotel" → Delegate to "Hotel Search Specialist"  
-    - service_type="train" OR "bus" → Delegate to "Train and Bus Search Specialist"
-    - service_type="attractions" → Delegate to "Local Attractions and Recommendations Specialist"
+    1. You may ONLY delegate to your subordinates: [language_agent, flight_agent, etc.].
+    2. You must NEVER delegate a task to 'travel_manager' (yourself).
+    3. If a task is complete, provide the final answer to the user.
+    - service_type="flight" → Delegate to "flight_agent"
+    - service_type="hotel" → Delegate to "hotel_agent"  
+    - service_type="train" OR "bus" → Delegate to "train_and_bus_agent"
+    - service_type="attractions" → Delegate to "local_attractions_agent"
     
     WORKFLOW:
     1. Receive language analysis
@@ -128,14 +143,15 @@ manager_agent = Agent(
     verbose=settings.CREW_VERBOSE,
     memory=False,
     allow_delegation=True,
-    max_iter=5  # CRITICAL: Limit iterations to prevent loops
+    max_iter=5  
+    
 )
 
 
 # ==================== AGENT 3A: Flight Search Agent ====================
 
 flight_agent = Agent(
-    role='flight_search_specialist',
+    role='flight_agent',
     goal='Find flight options quickly and return structured results',
     backstory="""You are a flight search specialist. 
     
@@ -176,14 +192,14 @@ flight_agent = Agent(
     verbose=settings.CREW_VERBOSE,
     memory=False,
     allow_delegation=False,  # CRITICAL: Prevent delegation loops
-    max_iter=3,
+    max_iter=1,
   
 )
 
 # ==================== AGENT 3B: Hotel Search Agent ====================
 
 hotel_agent = Agent(
-    role='hotel_search_specialist',
+    role='hotel_agent',
     goal='Find hotel options quickly and return structured results',
     backstory="""You are a hotel search specialist.
     
@@ -221,13 +237,13 @@ hotel_agent = Agent(
     verbose=settings.CREW_VERBOSE,
     memory=False,
     allow_delegation=False,  # CRITICAL: Prevent delegation loops
-    max_iter=3  # CRITICAL: Limit tool usage
+    max_iter=1  # CRITICAL: Limit tool usage
 )
 
 # ==================== AGENT 3C: Transport Agent (Train/Bus) ====================
 
 transport_agent = Agent(
-    role='train_and_bus_search_specialist',
+    role='train_and_bus_agent',
     goal='Find train/bus options quickly and return structured results',
     backstory="""You are a train and bus specialist.
     
@@ -267,13 +283,13 @@ transport_agent = Agent(
     verbose=settings.CREW_VERBOSE,
     memory=False,
     allow_delegation=False,  # CRITICAL: Prevent delegation loops
-    max_iter=3  # CRITICAL: Limit tool usage
+    max_iter=1  # CRITICAL: Limit tool usage
 )
 
 # ==================== AGENT 3D: Attractions Agent ====================
 
 attractions_agent = Agent(
-    role='local_attractions_and_recommendations_specialist',
+    role='local_attractions_agent',
     goal='Find attractions quickly and return structured results',
     backstory="""You are a local travel expert.
     
@@ -310,14 +326,14 @@ attractions_agent = Agent(
     llm=llm,
     verbose=settings.CREW_VERBOSE,
     memory=False,
-    allow_delegation=False,  # CRITICAL: Prevent delegation loops
-    max_iter=3  # CRITICAL: Limit tool usage
+    allow_delegation=False, 
+    max_iter=1  # CRITICAL: Limit tool usage
 )
 
 # ==================== AGENT 4: Response Translation Agent ====================
 
 response_agent = Agent(
-    role='multilingual_response_translator',
+    role='multilingual_response_agent',
     goal='Translate search results to user\'s language efficiently',
     backstory="""You translate search results to the user's language naturally.
     
@@ -368,7 +384,7 @@ response_agent = Agent(
 # ==================== AGENT 5: Follow-up Handler Agent ====================
 
 followup_agent = Agent(
-    role='followup_question_handler',
+    role='followup_question_agent',
     goal='Answer questions about search results using conversation context',
     backstory="""You handle follow-up questions about search results.
     
@@ -417,7 +433,7 @@ followup_agent = Agent(
 # ==================== AGENT 6: Booking Agent ====================
 
 booking_agent = Agent(
-    role='booking_confirmation_specialist',
+    role='booking_confirmation_agent',
     goal='Generate realistic booking confirmations OR request missing booking details',
     backstory="""You are a booking specialist who generates realistic booking confirmations.
     
@@ -523,8 +539,8 @@ followup_manager_agent = Agent(
     backstory="""You are an intelligent coordinator managing follow-up interactions.
     
     Your team consists of:
-    - Follow-up Question Handler: Answers questions about search results using context
-    - Booking Confirmation Specialist: Generates booking confirmations with passenger details
+    - followup_question_agent: Answers questions about search results using context
+    - booking_confirmation_agent: Generates booking confirmations with passenger details
     
     YOUR RESPONSIBILITIES:
     1. Analyze the user's follow-up request

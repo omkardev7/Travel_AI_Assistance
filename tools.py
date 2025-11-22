@@ -13,7 +13,11 @@ def get_exa_tool() -> EXASearchTool:
             api_key=settings.EXA_API_KEY,
             content=settings.EXA_CONTENT,      # Fetch full content
             summary=settings.EXA_SUMMARY,      # Get AI summaries (REQUIRED)
-            type=settings.EXA_TYPE             # Auto-detect search type
+            type=settings.EXA_TYPE,             # Auto-detect search type
+            # text={
+            #     "max_characters": 2500,  # Enough for prices/details, avoids huge payloads
+            #     "include_html_tags": False # purely text, faster for LLM to read
+            # }
         )
         logger.info("EXA Search Tool initialized successfully")
         return tool
