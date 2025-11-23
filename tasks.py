@@ -14,69 +14,84 @@ logger = setup_logger(__name__, settings.LOG_LEVEL)
 # ==================== TASK 1: Language Detection & Translation ====================
 
 task_language_detection = Task(
-    description="""
-    Analyze the user's input message and extract all travel-related information.
+    description=f"""
+   Parse the user's travel query to extract all booking-relevant information.
     
-    Steps:
-    1. Detect the language of the input (return ISO code and full name)
-    2. Translate to English if not already English
-    3. Validate if this is travel-related
-    4. Identify service type: flight, hotel, train, bus, or attractions
-    5. Extract key entities:
-       - origin: Starting location (for flights, trains, buses)
-       - destination: Target location (required for all services)
-       - date: Travel date or check-in date
-       - guests: Number of travelers (for hotels)
-       - budget: Price preference (optional)
-    6. Check if all required information is present:
-       - flight: needs origin, destination, date
-       - hotel: needs destination, check-in date, optionally check-out date
-       - train/bus: needs origin, destination, date
-       - attractions: needs destination only
-    7. If information is missing, ask user to provide ALL missing details in ONE complete message
+    USER INPUT: {{user_input}}
     
-    CRITICAL: When incomplete, request ALL missing information at once. 
-    DO NOT ask incremental questions. Be clear about what's needed.
+    EXECUTE THIS SYSTEMATIC PROCESS:
     
-    Return ONLY a valid JSON object (no markdown formatting):
+    **STEP 1**: DETECT LANGUAGE
+      Identify the language and return both ISO code (en, hi, ta, mr, bn, etc.) and full name.
+    
+    **STEP 2**: TRANSLATE TO ENGLISH
+      Convert query to English while preserving all travel details, intent, and context.
+    
+    **STEP 3**: VALIDATE IF TRAVEL-RELATED
+      Determine if this concerns flights, hotels, trains, buses, attractions, or travel packages.
+      Set is_travel_related: true/false
+    
+    **STEP 4**: IDENTIFY SERVICE TYPE
+      Map to one of: flight, hotel, train, bus, attractions
+    
+    **STEP 5**: EXTRACT ENTITIES (Use inject_date feature for current date)
+    
+      🌍 origin: Departure city with code if known (BOM, DEL, NDLS)
+      🎯 destination: Arrival city (REQUIRED for all services)
+      📅 date: CONVERT to YYYY-MM-DD format (use injected current date for relative dates)
+         - Store both converted date and original phrase
+         - Examples: "tomorrow" → "2024-01-16", "kal" → "2024-01-16"
+      🔄 return_date: For round trips, also in YYYY-MM-DD
+      👥 passengers: Number of travelers (default: 1 if not mentioned)
+      💺 class: Travel class (default: "economy" for flights/trains, "standard" for hotels)
+      💰 budget: Price range if mentioned (can be null)
+      ⏰ time_preference: morning/afternoon/evening/night if mentioned
+    
+    **STEP 6**: CHECK COMPLETENESS
+    
+      Mark COMPLETE if:
+      - Flight/Train/Bus: has origin + destination + date
+      - Hotel: has destination + check-in date + optionally check-out date
+      - Attractions: has destination only
+    
+    Mark INCOMPLETE if critical info missing.
+    
+    **STEP 7**: GENERATE FOLLOW-UP IF INCOMPLETE
+    
+      Ask for ALL missing information in ONE message using user's language:
+    
+      Hindi: "आपकी यात्रा की पूरी जानकारी के लिए कृपया बताएं:\\n\\n1️⃣ कहाँ से कहाँ जाना है?\\n2️⃣ यात्रा की तारीख?\\n3️⃣ कितने यात्री?\\n4️⃣ कौन सी सेवा चाहिए?\\n\\nएक साथ सारी जानकारी दें! 🙏"
+    
+      English: "To help you, please provide ALL details:\\n\\n1️⃣ From where to where?\\n2️⃣ Travel date?\\n3️⃣ Number of travelers?\\n4️⃣ Service needed?\\n\\nProvide complete info for faster help! 🙏"
+    
+      Tamil: "உங்கள் பயணத்திற்கு:\\n\\n1️⃣ எங்கிருந்து எங்கு?\\n2️⃣ பயண தேதி?\\n3️⃣ எத்தனை பேர்?\\n4️⃣ என்ன சேவை?\\n\\nமுழு தகவலை ஒரே செய்தியில் கொடுங்கள்! 🙏"
+    
+    **EXPECTED OUTPUT**: Valid JSON (NO markdown)
+    
     {{
         "detected_language": "hi",
         "language_name": "Hindi",
-        "english_translation": "I need a flight from Mumbai to Delhi tomorrow",
+        "english_translation": "I need flight from Mumbai to Delhi on 2024-01-15 for 2 passengers",
         "is_travel_related": true,
         "service_type": "flight",
         "entities": {{
             "origin": "Mumbai",
+            "origin_code": "BOM",
             "destination": "Delhi",
-            "date": "tomorrow",
-            "guests": null,
-            "budget": null
+            "destination_code": "DEL",
+            "date": "2024-01-15",
+            "date_original": "tomorrow",
+            "return_date": null,
+            "passengers": 2,
+            "class": "economy",
+            "budget": null,
+            "time_preference": null
         }},
         "is_complete": true,
         "missing_info": [],
-        "followup_question": null
+        "followup_question": null,
+        "assumptions_made": ["Assumed economy class", "Converted 'tomorrow' to 2024-01-15"]
     }}
-    
-    Example when incomplete:
-    {{
-        "detected_language": "mr",
-        "language_name": "Marathi",
-        "english_translation": "I want to go from Pune to Delhi",
-        "is_travel_related": true,
-        "service_type": "flight",
-        "entities": {{
-            "origin": "Pune",
-            "destination": "Delhi",
-            "date": null,
-            "guests": null
-        }},
-        "is_complete": false,
-        "missing_info": ["date", "guests", "service_type"],
-        "followup_question": "कृपया संपूर्ण माहिती एकत्र द्या: तुम्ही केव्हा (तारीख) प्रवास करत आहात, किती लोक प्रवास करत आहेत, कोणती सेवा हवी आहे (विमान/ट्रेन/बस/हॉटेल), आणि तुमचा बजेट काय आहे?"
-    }}
-    
-    User input: {user_input}
-    
     FINAL INSTRUCTION:
     Once you have the JSON output, your job is DONE. 
     Simply return the JSON object as your final answer.
@@ -90,45 +105,76 @@ task_language_detection = Task(
 # ==================== TASK 2: Search (Manager Delegates to ONE Specialist) ====================
 
 task_search = Task(
-    description="""
-    Fulfill the travel request by searching for the appropriate service.
+    description=f"""
+    Coordinate the travel search by routing to the appropriate specialist.
     
+    **STEP 1**: PARSE INPUT FROM LANGUAGE AGENT
     INPUT: You receive the language agent's JSON output containing:
     - service_type: flight/hotel/train/bus/attractions
     - entities: {{origin, destination, date, guests, budget}}
     - is_complete: true/false
-    - followup_question: question in user's language (if incomplete)
     
-    LOGIC:
+    **STEP 2**: IF INCOMPLETE (is_complete == false)
+    ❌ DO NOT search
+    ✅ Return immediately:
+    {{
+        "status": "incomplete",
+        "followup_question": "<question from language agent>"
+    }}
+    STOP EXECUTION
     
-    **IF is_complete is FALSE:**
-    - DO NOT perform any search
-    - Return immediately: {{"status": "incomplete", "followup_question": "<the question>"}}
-    
-    **IF is_complete is TRUE:**
+    **STEP 3**: IF COMPLETE (is_complete == true)
     - Based on service_type, the appropriate specialist will be assigned:
       * service_type="flight" → "flight_agent" handles this
+            Pass: "Search flights from (origin) to (destination) on (date) for (passengers) passengers in (class) class"
+
       * service_type="hotel" → "hotel_agent" handles this
+            Pass: "Search hotels in (destination) for check-in (date) with (guests) guests"
+
       * service_type="train" or "bus" → "train_and_bus_agent" handles this
+            Pass: "Search (service_type) from (origin) to (destination) on (date) for (passengers) passengers"
+
+      
       * service_type="attractions" → "local_attractions_agent" handles this
-    
+            Pass: "Search top attractions in (destination)"
+            
     - The specialist will:
       1. Build a search query from entities
       2. Use EXA tool to search relevant platforms
       3. Extract and structure results
       4. Return top 6 options in JSON format
     
-    Expected output (if complete):
-    {{
-        "flights": [...],  // or "hotels", "trains", "buses", "attractions"
-        "search_query": "flights from Mumbai to Delhi tomorrow",
-        "result_count": 6
-    }}
+    EXPECTED OUTPUT:
     
-    Expected output (if incomplete):
+    If incomplete:
     {{
         "status": "incomplete",
-        "followup_question": "आप कहाँ से यात्रा करना चाहते हैं?"
+        "followup_question": "आपकी यात्रा की पूरी जानकारी..."
+    }}
+    
+    If complete (example for flights):
+    {{
+        "status": "success",
+        "service_type": "flight",
+        "route": "Mumbai (BOM) → Delhi (DEL)",
+        "travel_date": "2024-01-15",
+        "passengers": 2,
+        "flights": [
+            {{
+                "airline": "IndiGo",
+                "flight_number": "6E-2341",
+                "departure_time": "06:15",
+                "arrival_time": "08:25",
+                "duration": "2h 10m",
+                "price": "₹4,250",
+                "price_numeric": 4250,
+                "class": "Economy",
+                "stops": "Non-stop",
+                "baggage": "15kg check-in + 7kg cabin"
+            }}
+        ],
+        "result_count": 6,
+        "price_range": "₹4,250 - ₹8,900"
     }}
     
     Context from language agent: Use the output from the previous task
@@ -160,16 +206,78 @@ task_final_response = Task(
     - DO NOT add any extra text
     
     **SCENARIO B: Complete Search Results**
-    - Translate all results to the detected language
-    - Format naturally with:
-      * Proper currency symbols: ₹ (India), $ (US), € (Europe), ¥ (Japan)
-      * Natural date/time formats
-      * Numbered list: 1, 2, 3, 4, 5
-      * Clear structure with line breaks
-      * Preserve all important details: prices, times, names, flight numbers
-    - End with a helpful follow-up question in the user's language like:
-      * "क्या आप किसी फ्लाइट के बारे में और जानना चाहेंगे?" (Hindi)
-      * "Would you like more details about any of these?"
+      IF search results contain actual travel options:
+    
+    STEP 1: TRANSLATE NATURALLY
+    - Translate to detected_language
+    - Use conversational tone
+    - Maintain technical accuracy (prices, times, names)
+    
+    STEP 2: FORMAT WITH STRUCTURE
+    
+    Basic structure:
+    📍 Brief acknowledgment + summary (1-2 lines)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    [Numbered options 1️⃣ 2️⃣ 3️⃣ 4️⃣ 5️⃣]
+    
+    💡 [Price range or tip]
+    
+    ❓ [Follow-up question]
+    
+    Service-specific formats:
+    
+    FLIGHTS:
+    ✈️ [Airline] [Flight No]
+       🕐 [Depart] → [Arrive] ([Duration])
+       💰 [Price] | [Class] | [Stops]
+    
+    HOTELS:
+    🏨 [Name] ⭐ [Rating]
+       📍 [Location]
+       💰 [Price]/night | [Room Type]
+       ✅ [Amenities]
+    
+    TRAINS:
+    🚂 [Train Name] ([Number])
+       🕐 [Depart] → [Arrive] ([Duration])
+       💺 [Classes]: [Prices]
+       📊 [Availability]
+    
+    BUSES:
+    🚌 [Operator] - [Type]
+       🕐 [Depart] → [Arrive] ([Duration])
+       💰 [Price] | 💺 [Seats]
+    
+    ATTRACTIONS:
+    📍 [Name]
+       🏛️ [Category] | ⭐ [Rating]
+       💰 [Entry Fee] | ⏰ [Timings]
+       📝 [Brief description]
+    
+    STEP 3: FORMAT NUMBERS & CURRENCY
+    - Currency: Use ₹ symbol (₹4,250 not Rs. 4,250)
+    - Time: 12-hour with AM/PM (06:30 AM not 0630)
+    - Keep proper spacing and line breaks
+    
+    STEP 4: ADD ENGAGING FOLLOW-UP
+    
+    Hindi: "क्या आप किसी विकल्प के बारे में और जानना चाहेंगे? या बुकिंग करें? 😊"
+    
+    English: "Would you like more details about any option? Or shall I help you book? 😊"
+    
+    Tamil: "ஏதேனும் விருப்பத்தைப் பற்றி மேலும் தெரிந்து கொள்ள விரும்புகிறீர்களா? 😊"
+    
+    Marathi: "अधिक माहिती हवी आहे का? किंवा बुकिंग करू? 😊"
+    
+    QUALITY CHECKLIST:
+    ✅ Natural and conversational
+    ✅ Easy to scan (emojis, spacing)
+    ✅ All prices and times visible
+    ✅ Translated to user's language
+    ✅ No technical jargon
+    ✅ Actionable next steps
+    ✅ PLAIN TEXT (NO JSON, NO markdown code blocks)
     
     IMPORTANT: Return plain text in the user's language, NOT JSON.
     Make it conversational and easy to read.
@@ -247,6 +355,9 @@ task_followup_handling = Task(
     - If booking details are complete:
       * Full booking confirmation in user's language
       * Include PNR/Booking ID, seats/rooms, passenger details
+      * Use emojis and friendly toneorigin
+      * It should look realistic and professional
+      
     - If booking details are incomplete:
       * Request for missing details (names, contact, email) in user's language
     

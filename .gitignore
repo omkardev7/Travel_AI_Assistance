@@ -3,3 +3,4 @@ venv/
 __pycache__/
 *.pyc
 travel_memory.db
+test.py

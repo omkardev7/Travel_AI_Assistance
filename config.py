@@ -2,6 +2,7 @@ import os
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 import logging
+from datetime import datetime, timedelta
 
 
 load_dotenv()
@@ -89,3 +90,20 @@ try:
 except ValueError as e:
     logger.warning(f"Configuration validation failed: {e}")
     logger.warning("Application may not function correctly without proper configuration")
+    
+def get_date_context():
+    """Generate current date context for agents"""
+    today = datetime.now()
+    tomorrow = today + timedelta(days=1)
+    day_after = today + timedelta(days=2)
+    next_week = today + timedelta(days=7)
+
+    return f"""
+CURRENT DATE CONTEXT (USE THIS FOR ALL DATE INTERPRETATIONS):
+- TODAY: {today.strftime('%A, %d %B %Y')} (use format: {today.strftime('%Y-%m-%d')})
+- TOMORROW: {tomorrow.strftime('%A, %d %B %Y')} (use format: {tomorrow.strftime('%Y-%m-%d')})
+- DAY AFTER TOMORROW: {day_after.strftime('%A, %d %B %Y')} (use format: {day_after.strftime('%Y-%m-%d')})
+- NEXT WEEK: {next_week.strftime('%A, %d %B %Y')} (use format: {next_week.strftime('%Y-%m-%d')})
+- CURRENT TIME: {today.strftime('%H:%M')} IST
+
+"""
